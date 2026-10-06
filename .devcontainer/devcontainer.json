@@ -1,0 +1,23 @@
+{
+  "name": "AIRI + DeepSeek 直播助播",
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/node:2": {
+      "version": "26.7.0",
+      "pnpmVersion": "11.24.0"
+    }
+  },
+  "remoteUser": "vscode",
+  "forwardPorts": [8787, 5173],
+  "portsAttributes": {
+    "8787": { "label": "助播文字联调台", "onAutoForward": "notify", "visibility": "private" },
+    "5173": { "label": "AIRI 舞台", "onAutoForward": "notify", "visibility": "private" }
+  },
+  "postCreateCommand": "npm run check && npm test",
+  "customizations": {
+    "vscode": {
+      "extensions": ["Vue.volar"],
+      "settings": { "files.eol": "\n" }
+    }
+  }
+}

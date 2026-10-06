@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>助播 · 文字联调台</title>
+<style>
+  :root{font:16px/1.65 system-ui,sans-serif;color:#e9eef5;background:#101923;color-scheme:dark}body{max-width:900px;margin:40px auto;padding:0 20px}h1{font-size:28px;margin-bottom:4px}p{color:#b4c0cf}section{background:#1a2634;border:1px solid #344353;border-radius:12px;padding:20px;margin:18px 0}label{display:block;margin:10px 0}input,textarea,select{box-sizing:border-box;background:#0f1925;border:1px solid #566477;color:inherit;border-radius:6px;padding:10px;font:inherit;max-width:100%}textarea{width:100%;min-height:90px}button{font:inherit;padding:8px 15px;border:0;border-radius:6px;background:#92d4c7;color:#122a25;cursor:pointer;margin:5px 6px 5px 0}button:disabled{opacity:.45;cursor:wait}.stop{background:#ffbab4}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;background:#0e1721;padding:15px;border-radius:8px;min-height:70px}#status{color:#a8e0d3}small{color:#b4c0cf}.row{display:flex;gap:12px;flex-wrap:wrap}.row label{flex:1;min-width:160px}.row input{width:100%}
+</style>
+<h1>助播 · 文字联调台</h1>
+<p>先练习接话与让话。当前为文字原型，尚未连接麦克风、声音、Live2D 和真实平台弹幕。</p>
+<label>助播访问令牌（本地或私有 Codespaces 无需填写）<br><input id="token" type="password" autocomplete="off" placeholder="不是 DeepSeek API Key"></label>
+<button id="refresh">刷新状态</button><small id="status" role="status"></small>
+<section>
+<h2>和主播对话</h2>
+<textarea id="hostText" placeholder="例如：我们今天聊聊，为什么大家喜欢和虚拟角色交流？"></textarea>
+<button id="reply">让助播接话</button><button class="stop" id="interrupt">打断回答</button>
+<label><input type="checkbox" id="speaking"> 我正在讲话，助播先听</label>
+<label><input type="checkbox" id="muted"> 保持安静</label>
+<pre id="answer" aria-live="polite">回答会显示在这里。</pre>
+<small id="result"></small>
+</section>
+<section>
+<h2>模拟弹幕</h2><p>验证挑选、冷却和主播优先。这里不会连接或发送消息到直播平台。</p>
+<div class="row"><label>来源<br><select id="platform"><option value="bilibili">B站（模拟）</option><option value="wechat">视频号（模拟）</option><option value="manual">手动输入</option></select></label><label>观众标识<br><input id="userId" value="viewer-1" maxlength="128"></label></div>
+<textarea id="viewerText" maxlength="500" placeholder="观众说了什么？"></textarea>
+<label><input id="mentioned" type="checkbox" checked> 直接向助播提问</label>
+<label><input id="selected" type="checkbox"> 主播点选了这条消息</label>
+<button id="enqueue">加入候选队列</button><button id="viewerReply">挑一条回复</button>
+<p>默认全局冷却 20 秒，同一观众冷却 60 秒，消息 20 秒过期。</p>
+</section>
+<button id="reset">清空本场文字上下文和队列</button>
+<script type="module">
+const $ = id => document.getElementById(id)
+let activeRequest = null
+function headers() { return {'Content-Type':'application/json', ...($('token').value ? {Authorization:`Bearer ${$('token').value}`} : {})} }
+async function api(path, body, signal) {
+  const response = await fetch(`/api/${path}`, {method:body === undefined ? 'GET':'POST',headers:headers(),body:body === undefined ? undefined:JSON.stringify(body),signal})
+  if (!response.ok) throw new Error((await response.json()).error)
+  return response
+}
+async function refresh() {
+  const state = await (await api('status')).json()
+  $('status').textContent = `${state.deepseekConfigured ? 'DeepSeek 已配置（连通性待调用确认）':'DeepSeek 未配置'} · 队列 ${state.queued} · ${state.busy ? '正在回答':state.muted ? '保持安静':state.hostSpeaking ? '正在听主播':'等待接话'}`
+  $('speaking').checked = state.hostSpeaking
+  $('muted').checked = state.muted
+}
+function bind(id, action) {
+  $(id).addEventListener('click', async () => {
+    try { await action(); await refresh() } catch (error) { $('result').textContent = error.message }
+  })
+}
+async function generate(source) {
+  if (activeRequest) throw new Error('先打断当前回答，再开始下一轮。')
+  const controller = new AbortController()
+  activeRequest = controller
+  $('reply').disabled = $('viewerReply').disabled = true
+  $('answer').textContent = ''
+  $('result').textContent = '正在接话…'
+  try {
+    const response = await api('reply',{source,text:$('hostText').value},controller.signal)
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let ended = false
+    while (true) {
+      const {value,done} = await reader.read()
+      buffer += done ? decoder.decode() : decoder.decode(value,{stream:true})
+      let at
+      while ((at = buffer.indexOf('\n')) >= 0) {
+        const event = JSON.parse(buffer.slice(0,at))
+        buffer = buffer.slice(at + 1)
+        if (event.type === 'delta') $('answer').textContent += event.text
+        if (['done','cancelled','error'].includes(event.type)) {
+          ended = true
+          $('result').textContent = event.type === 'done' ? '回答完成' : event.type === 'cancelled' ? '已打断，未完成回答不进入后续上下文' : event.message
+        }
+      }
+      if (done) break
+    }
+    if (!ended) throw new Error('连接已中断，回答未完成。')
+  } catch (error) {
+    $('result').textContent = error.name === 'AbortError' ? '已打断' : error.message
+  } finally {
+    activeRequest = null
+    $('reply').disabled = $('viewerReply').disabled = false
+  }
+}
+bind('refresh',refresh)
+bind('reply',() => generate('host'))
+bind('viewerReply',() => generate('viewer'))
+bind('interrupt',async () => { activeRequest?.abort(); await api('interrupt',{}) })
+bind('speaking',() => api('host-speaking',{value:$('speaking').checked}))
+bind('muted',() => api('mute',{value:$('muted').checked}))
+bind('enqueue',async () => {
+  const result = await (await api('danmaku',{id:crypto.randomUUID(),platform:$('platform').value,userId:$('userId').value,text:$('viewerText').value,mentioned:$('mentioned').checked,selected:$('selected').checked})).json()
+  $('result').textContent = result.accepted ? '已加入候选队列' : '重复消息已忽略'
+})
+bind('reset',async () => { activeRequest?.abort(); await api('reset',{}); $('answer').textContent = ''; $('result').textContent = '已清空上下文和队列，限流状态保留' })
+refresh().catch(error => { $('status').textContent = error.message })
+</script>
+</html>

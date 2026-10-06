@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/moeru-ai/airi.git",
+  "commit": "34576c19f618a04e616657089f0688a8637873f2",
+  "node": "26.7.0",
+  "pnpm": "11.24.0",
+  "verifiedAt": "2026-10-06",
+  "verification": "Upstream source and tool versions inspected. Full installation and stage rendering are not yet verified."
+}

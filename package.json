@@ -1,0 +1,14 @@
+{
+  "name": "ds-zhubo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env apps/cohost/server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node scripts/check.mjs",
+    "setup:airi": "node scripts/airi.mjs setup",
+    "dev:airi": "node scripts/airi.mjs dev"
+  }
+}
