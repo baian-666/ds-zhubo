@@ -2,7 +2,9 @@
 
 更新：2026-10-06。
 
-本次准备将本地代码草稿和完整交接一同保存至 GitHub。Codex Cloud 环境仍需建立并验证；ChatGPT Work 云端对话已保留讨论上下文，但不能代替代码或执行环境。
+代码草稿和完整交接已保存至 GitHub main，初始代码提交为 `f180cfe1bb31c29efc3f182346aab20bbd233d0f`，共 23 个文件。
+
+Codex Cloud 环境尚未建立：当前可用浏览器和命令行未登录，等待用户完成登录后选择关联仓库。ChatGPT Work 云端对话已保留讨论上下文，但不能代替代码或执行环境。
 
 ## 用户已经确定
 
@@ -25,6 +27,7 @@
 
 - 本地 Node 24.19.0：`node scripts/check.mjs` 通过。
 - 本地 Node 24.19.0：`node --test tests/*.test.mjs`，14 项测试通过。
+- GitHub Actions（Ubuntu、Node 26.7.0）：同一代码提交的语法检查及 14 项测试通过。[运行记录](https://github.com/baian-666/ds-zhubo/actions/runs/37417837585)
 - 测试覆盖打断与迟到结果、静音、过期、去重、冷却、中文 SSE 分片、截断流、接口权限及 HTTP 对话。
 - 浏览器验证通过：中文页面、模拟弹幕入队、主播讲话状态切换、缺少 API Key 时的明确提示。
 - 未验证：真实 DeepSeek API、Dev Container 构建、AIRI 全量安装、麦克风、TTS、Live2D 播放、真实弹幕、生产云服务和推流。
