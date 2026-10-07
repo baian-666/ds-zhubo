@@ -1,10 +1,20 @@
 # 当前状态
 
-更新：2026-10-06。
+更新：2026-10-07。
 
 代码草稿和完整交接已保存至 GitHub main，初始代码提交为 `f180cfe1bb31c29efc3f182346aab20bbd233d0f`，共 23 个文件。
 
-Codex Cloud 环境尚未建立：当前可用浏览器和命令行未登录，等待用户完成登录后选择关联仓库。ChatGPT Work 云端对话已保留讨论上下文，但不能代替代码或执行环境。
+本次已在关联仓库的 Codex Cloud 环境接续，运行时为 running/connected。ChatGPT Work 云端对话保留的讨论上下文不能代替代码或执行环境。
+
+## 2026-10-07 云端文字测试准备
+
+- 已读取 AGENTS.md、HANDOFF.md、STATUS.md、CLOUD.md，用户要求暂不调用付费 API。
+- Node 24.19.0；`npm run check` 通过；`npm test` 14 项通过，全部使用模拟模型，不请求真实 DeepSeek。默认命令沙箱禁止本地监听，启用命令网络权限后测试通过。
+- 环境配置绑定网络密钥 `DEEPSEEK_API_KEY` 到同名变量，仅允许注入 `api.deepseek.com`；变量存在，未读取、显示或记录密钥值。
+- 状态工具多次返回 `observations_current: true`，但密钥状态与网络策略状态均为 `unknown`。不能把变量存在判定为凭据 `ready`，也不能把允许名单判定为策略 `enforced`。
+- `/etc/codex/network-policy.json`（version 1）及状态工具的允许名单均包含 `api.deepseek.com`。保留环境代理和 TLS 验证，启用命令网络权限后，无 Authorization 的 HEAD 请求到域名根路径返回 HTTP 401；证明当次网络可达，不证明密钥有效、额度充足或聊天端点可用。未调用聊天生成端点。
+- 文字聊天流程及记录模板已保存到 `docs/TEXT-CHAT-TEST.md`。真实文字聊天、首字延迟及模型兼容性仍待验证；本次不启动可发送付费请求的联调服务。
+- 下一步：等待运行时观测明确密钥 `ready`、网络策略 `enforced`，再在用户授权真实调用后执行少量文字对话；不将本轮准备视为语音或自然互动验收。
 
 ## 用户已经确定
 
