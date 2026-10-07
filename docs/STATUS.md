@@ -24,7 +24,7 @@
 - 付费生成 #1：`deepseek-flash`，提示“只回复：好”，非流式、关闭 thinking、max_tokens 8。HTTP 200，回答为“好”，完成约 746 ms；usage 为输入 8、输出 1、共 9 tokens。没有自动重试。
 - 付费生成 #2：通过现有 `/api/reply` 发一条最短主播文字请求，验证项目的真实流式链路。HTTP 200，事件为 start → delta → done，回答 1 个字符，首个 delta 约 909 ms，完成约 963 ms。此链路未返回 token usage，未估算费用。
 - 联调台已启动于云环境 `127.0.0.1:8787`，healthz/status 均为 200。启动使用 `node --use-env-proxy --env-file-if-exists=.env apps/cohost/server.mjs`，保持环境注入凭据、代理与 TLS 信任；进程随环境生命周期结束，不是持久部署。原型源码未修改。
-- 用户浏览器入口仍未验证：当前工具没有云端端口转发功能，环境没有 preview/port/tunnel 地址变量。`open_in_codex` 浏览器打开动作返回 queued，不能视为访问成功。已询问用户界面是否提供 8787 端口预览；未使用第三方隧道或部署公开网站。
+- 用户浏览器入口被当前环境能力阻塞：当前工具没有云端端口转发功能，环境没有 preview/port/tunnel 地址变量。`open_in_codex` 浏览器打开动作返回 queued，不能视为访问成功。用户确认界面没有端口预览功能；未使用第三方隧道或部署公开网站。不能提供用户可打开的测试 URL。
 - 下一步仅获取环境提供的安全预览地址并验证页面，然后由用户进行少量人工文字对话；真实语音、AIRI、平台与自然互动验收仍未执行。
 
 ## 用户已经确定
