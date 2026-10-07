@@ -16,6 +16,17 @@
 - 文字聊天流程及记录模板已保存到 `docs/TEXT-CHAT-TEST.md`。真实文字聊天、首字延迟及模型兼容性仍待验证；本次不启动可发送付费请求的联调服务。
 - 下一步：等待运行时观测明确密钥 `ready`、网络策略 `enforced`，再在用户授权真实调用后执行少量文字对话；不将本轮准备视为语音或自然互动验收。
 
+## 2026-10-07 真实文字 API 验证
+
+- 用户随后授权少量付费 API 调用，要求最短请求验证后启动文字联调台；不购买资源、不接语音或正式直播，保护现有修改。
+- 当前配置 spec revision 4 与 observed revision 4 一致，观测为 current、running/connected；凭据与网络策略标记仍为 `unknown`。现有工具只有状态读取能力，不能修复观测标记或修改环境配置。未把实际调用成功改写成状态工具报告 `ready/enforced`。
+- 非生成诊断：经环境代理向 `/models` 请求一次，凭据仅从环境传入 Authorization，HTTP 200，模型列表包含 `deepseek-flash`、`deepseek-v4-pro`。实际鉴权可用，默认模型存在；未显示密钥、请求头或原始错误体。
+- 付费生成 #1：`deepseek-flash`，提示“只回复：好”，非流式、关闭 thinking、max_tokens 8。HTTP 200，回答为“好”，完成约 746 ms；usage 为输入 8、输出 1、共 9 tokens。没有自动重试。
+- 付费生成 #2：通过现有 `/api/reply` 发一条最短主播文字请求，验证项目的真实流式链路。HTTP 200，事件为 start → delta → done，回答 1 个字符，首个 delta 约 909 ms，完成约 963 ms。此链路未返回 token usage，未估算费用。
+- 联调台已启动于云环境 `127.0.0.1:8787`，healthz/status 均为 200。启动使用 `node --use-env-proxy --env-file-if-exists=.env apps/cohost/server.mjs`，保持环境注入凭据、代理与 TLS 信任；进程随环境生命周期结束，不是持久部署。原型源码未修改。
+- 用户浏览器入口仍未验证：当前工具没有云端端口转发功能，环境没有 preview/port/tunnel 地址变量。`open_in_codex` 浏览器打开动作返回 queued，不能视为访问成功。已询问用户界面是否提供 8787 端口预览；未使用第三方隧道或部署公开网站。
+- 下一步仅获取环境提供的安全预览地址并验证页面，然后由用户进行少量人工文字对话；真实语音、AIRI、平台与自然互动验收仍未执行。
+
 ## 用户已经确定
 
 - 仓库：`baian-666/ds-zhubo`。
@@ -40,7 +51,8 @@
 - GitHub Actions（Ubuntu、Node 26.7.0）：同一代码提交的语法检查及 14 项测试通过。[运行记录](https://github.com/baian-666/ds-zhubo/actions/runs/37417837585)
 - 测试覆盖打断与迟到结果、静音、过期、去重、冷却、中文 SSE 分片、截断流、接口权限及 HTTP 对话。
 - 浏览器验证通过：中文页面、模拟弹幕入队、主播讲话状态切换、缺少 API Key 时的明确提示。
-- 未验证：真实 DeepSeek API、Dev Container 构建、AIRI 全量安装、麦克风、TTS、Live2D 播放、真实弹幕、生产云服务和推流。
+- 真实 DeepSeek 最短请求与项目文字流式链路已验证，详见本日真实文字 API 验证记录；两条极短回复不代表内容质量或自然互动验收通过。
+- 未验证：Dev Container 构建、AIRI 全量安装、麦克风、TTS、Live2D 播放、真实弹幕、生产云服务和推流。
 
 ## 下一步顺序
 
