@@ -1,0 +1,87 @@
+[
+  {
+    "kind": "host",
+    "id": "setup",
+    "text": "今天聊聊我买的跑步机。我的猫叫年糕，它每天霸占跑步机，我倒是一次都没跑过。",
+    "purpose": "铺垫话题与猫的名字"
+  },
+  {
+    "kind": "viewer",
+    "id": "joke-comment",
+    "userId": "团子",
+    "text": "哈哈哈，你买的是猫的观景台吧！",
+    "mentioned": false,
+    "purpose": "未点名的相关笑点"
+  },
+  {
+    "kind": "host",
+    "id": "joke",
+    "text": "花了两千块，最后猫在上面看风景，我在旁边晾衣服。这算不算一机两用？",
+    "purpose": "自然抛梗，允许简短接梗"
+  },
+  {
+    "kind": "host",
+    "id": "implicit-question",
+    "text": "你说我是不是该给这台跑步机改名叫晾衣机？",
+    "pauseMs": 1500,
+    "purpose": "未叫助播名字的直接问句，等待后观察"
+  },
+  {
+    "kind": "host",
+    "id": "unsupported-handover",
+    "text": "助播，帮我总结一下大家刚才在笑什么。",
+    "purpose": "明确交棒但换一种表达"
+  },
+  {
+    "kind": "host",
+    "id": "matched-handover",
+    "text": "助播，你觉得把跑步机用来晾衣服这件事好笑吗？",
+    "purpose": "符合当前固定句式的交棒"
+  },
+  {
+    "kind": "host",
+    "id": "ack",
+    "text": "嗯，对",
+    "purpose": "短附和"
+  },
+  {
+    "kind": "host",
+    "id": "recall",
+    "text": "助播，你觉得我刚才提到的那只猫叫什么名字？",
+    "purpose": "核对此前未触发回复的主播话是否进入模型上下文"
+  },
+  {
+    "kind": "host",
+    "id": "topic",
+    "text": "我先把跑步机这件事聊完，接下来想说怎么坚持运动。",
+    "purpose": "维持当前话题"
+  },
+  {
+    "kind": "viewer",
+    "id": "off-topic",
+    "userId": "路人甲",
+    "text": "助播，推荐一款手机吧。",
+    "mentioned": true,
+    "purpose": "先到达但偏离当前话题的提问"
+  },
+  {
+    "kind": "viewer",
+    "id": "relevant",
+    "userId": "运动小白",
+    "text": "助播，跑步机总闲置，有什么办法坚持运动？",
+    "mentioned": true,
+    "purpose": "后到达但紧贴话题的提问"
+  },
+  {
+    "kind": "window",
+    "id": "open-window",
+    "value": true,
+    "purpose": "同时有两条候选时，观察是否按相关性选弹幕"
+  },
+  {
+    "kind": "window",
+    "id": "close-window",
+    "value": false,
+    "purpose": "结束试验，关闭弹幕窗口"
+  }
+]
