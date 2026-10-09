@@ -62,14 +62,24 @@ export class Scheduler {
     return this.begin({ source: 'host', text })
   }
 
-  beginViewer() {
+  peekViewer() {
     this.expirePlayback()
     this.prune()
     if (this.muted || this.hostSpeaking || this.active || this.now() - this.lastViewerReply < this.cooldownMs) return null
-    // Only explicitly addressed or operator-selected messages qualify in this prototype.
-    const candidates = this.queue.filter(item => (item.mentioned || item.selected) && !this.users.has(`${item.platform}:${item.userId}`))
-    candidates.sort((a, b) => Number(b.selected) - Number(a.selected) || a.receivedAt - b.receivedAt)
-    const item = candidates[0]
+    return this.queue.filter(item => (item.mentioned || item.selected) && !this.users.has(`${item.platform}:${item.userId}`))
+      .sort((a, b) => Number(Boolean(b.selected)) - Number(Boolean(a.selected)) || a.receivedAt - b.receivedAt)[0] ?? null
+  }
+
+  selectViewer(platform, id) {
+    this.prune()
+    const item = this.queue.find(item => item.platform === platform && item.id === id)
+    if (!item) return false
+    item.selected = true
+    return true
+  }
+
+  beginViewer() {
+    const item = this.peekViewer()
     if (!item) return null
     this.queue = this.queue.filter(candidate => candidate !== item)
     this.lastViewerReply = this.now()

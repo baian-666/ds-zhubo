@@ -35,10 +35,12 @@ export class Director {
     this.pendingSemantic = null
     this.semanticJob = null
     this.trace = []
+    this.traceNumber = 0
+    this.viewerWindow = false
   }
 
   record(action, reason) {
-    const entry = { at: this.now(), revision: this.revision, action, reason }
+    const entry = { id: ++this.traceNumber, at: this.now(), revision: this.revision, action, reason }
     this.trace.push(entry)
     if (this.trace.length > 100) this.trace.shift()
     return entry
@@ -72,6 +74,11 @@ export class Director {
         if (!['manual', 'auto'].includes(event.value)) invalid('mode 需要 manual 或 auto')
         this.mode = event.value
         this.invalidate('mode_changed')
+        break
+      case 'viewer-window':
+        if (typeof event.value !== 'boolean') invalid('value 需要布尔值')
+        this.viewerWindow = event.value
+        this.invalidate('viewer_window_changed')
         break
       case 'speech-start': {
         const id = event.utterance
@@ -110,6 +117,7 @@ export class Director {
         this.acceptIntent(event, 'adapter')
         break
       case 'topic-change':
+        this.viewerWindow = false
         this.reset('topic_changed')
         this.scheduler.queue = []
         if (this.scheduler.active?.input.source === 'viewer') this.scheduler.interrupt()
@@ -180,6 +188,12 @@ export class Director {
     if (!candidate || candidate.id !== id || candidate.revision !== this.revision ||
       this.now() >= candidate.expiresAt || this.mode !== 'auto' || this.scheduler.muted ||
       this.scheduler.hostSpeaking || this.scheduler.active) return null
+    if (candidate.source === 'viewer') {
+      const item = this.scheduler.peekViewer()
+      if (!this.viewerWindow || !item || item.id !== candidate.messageId || item.platform !== candidate.platform) return null
+      this.invalidate('viewer_decision_consumed')
+      return this.scheduler.beginViewer()
+    }
     this.consumedUtterance = this.utterance.id
     if (candidate.intent === 'opportunity') this.lastParticipation = this.now()
     this.invalidate('decision_consumed')
@@ -223,9 +237,20 @@ export class Director {
 
   close() { this.pendingSemantic = null; this.semanticJob?.controller.abort() }
 
+  proposeViewer() {
+    if (!this.viewerWindow || this.mode !== 'auto' || this.candidate) return
+    const item = this.scheduler.peekViewer()
+    if (!item) return
+    this.candidate = { id: ++this.nextDecision, revision: this.revision, source: 'viewer',
+      messageId: item.id, platform: item.platform, text: item.text, intent: 'viewer',
+      expiresAt: Math.min(this.now() + this.opportunityMs, item.receivedAt + this.scheduler.ttlMs) }
+    this.record('reply', 'viewer_window_open')
+  }
+
   status() {
     if (this.candidate && this.now() >= this.candidate.expiresAt) this.candidate = null
-    return { mode: this.mode, revision: this.revision, utterance: this.utterance?.id ?? null,
+    this.proposeViewer()
+    return { viewerWindow: this.viewerWindow, trace: [...this.trace], mode: this.mode, revision: this.revision, utterance: this.utterance?.id ?? null,
       intent: this.intent, candidate: this.candidate ? { ...this.candidate } : null,
       lastDecision: this.trace.at(-1) ?? null, lastEventMs: this.lastEventMs ?? 0,
       semanticBusy: Boolean(this.semanticJob), semanticPending: Boolean(this.pendingSemantic) }

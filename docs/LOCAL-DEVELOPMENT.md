@@ -1,6 +1,12 @@
 # 转为本地主力开发
 
-更新：2026-10-09。用户选择在当前 Windows 主力电脑本地开发。云端任务与 GitHub 保留项目记录，模型仍通过 DeepSeek API 使用；本地开发并不要求本机运行大模型。
+更新：2026-10-10。用户选择在当前 Windows 主力电脑本地开发。云端任务与 GitHub 保留项目记录，模型仍通过 DeepSeek API 使用；本地开发并不要求本机运行大模型。
+
+## 当前 Windows 接续入口
+
+本轮已在 D:\ds-zhubo 安装固定版本工具链并启动 cohost。使用 scripts/setup-local.ps1 与 scripts/local.ps1，不需替换系统 Node。当前已实现 Windows 的 setup:airi:web 与 dev:airi；下方旧迁移记录中的“封装脚本拒绝 Windows”已被此实现替代。
+
+网页版优先，Electron 桌面端后置。完整启动与人工/自动导演操作见 [文字虚拟直播间](TEXT-ROOM.md)。工具链、AIRI Web 实际验收结果以 STATUS 最新记录为准。
 
 ## 已完成与尚未完成
 
@@ -40,14 +46,14 @@ npm run dev
 
 固定提交和依赖版本继续使用 `airi.lock.json`。先读上游 AGENTS，再安装；已有 `vendor/airi` 时检查 origin、HEAD 和修改，不覆盖已有工作。
 
-现有 `scripts/airi.mjs` 明确拒绝 Windows，因此 Windows 原生任务不能声称 `npm run setup:airi` 已支持。本阶段可按下面的上游 Web 命令执行；源码获取必须沿用固定仓库/提交和工作区保护检查。后续若改跨平台脚本，需要实际 Windows 验证。
+此前 `scripts/airi.mjs` 拒绝 Windows。本轮已实现并实际执行 `setup:airi:web` 的 Windows Web 安装与构建，原始全量桌面安装不在本轮验收范围。本阶段可按下面的上游 Web 命令执行；源码获取必须沿用固定仓库/提交和工作区保护检查。后续若改跨平台脚本，需要实际 Windows 验证。
 
 ```powershell
 # 先获取并核验 airi.lock.json 指定的仓库和提交到 vendor/airi
 Set-Location vendor/airi
 pnpm --filter @proj-airi/stage-web... install --frozen-lockfile --ignore-scripts
 pnpm -r --filter '@proj-airi/stage-web^...' --workspace-concurrency=2 --if-present run build
-pnpm -F @proj-airi/stage-web dev --host 127.0.0.1 --port 5173 --strictPort
+pnpm -F @proj-airi/stage-web exec vite --host 127.0.0.1 --port 5173 --strictPort
 ```
 
 安装跳过生命周期脚本是已用的 Web 安装范围，不代表桌面版和所有原生依赖已验证。如果本机需要代理，使用本机实际受支持的代理配置；不能照抄云端 `proxy:8080`。默认模型与 SDK 来自 `dist.ayaka.moe` 和 `cubism.live2d.com`，按本机真实网络结果诊断。下载成功后在本机 `http://127.0.0.1:5173` 验证实际形象渲染。

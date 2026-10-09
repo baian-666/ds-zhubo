@@ -1,6 +1,15 @@
 # AIRI 舞台安装与接入记录
 
-更新：2026-10-09。本文记录实际执行结果；安装成功不代表形象、语音或虚拟直播间已经验收。
+更新：2026-10-10。本文记录实际执行结果；安装成功不代表形象、语音或虚拟直播间已经验收。
+
+## 2026-10-10 Windows Web 实际接续
+
+- 固定版本与工具链延续交接，安装及工作区依赖 build 已在 Windows 原生完成。
+- scripts/airi.mjs 已支持 Windows，新增 setup:airi:web；用项目忽略目录中的 pnpm CLI，不经 cmd 拼接参数。
+- SDK 与全部默认 Live2D/VRM 资源下载通过，exec vite --host 127.0.0.1 --port 5173 --strictPort 已启动。
+- 默认 Hiyori Live2D 在独立 Edge 与 cohost iframe 中实际渲染，截图位于忽略的 data/airi-stage.png 和 data/room-with-airi.png。
+- 可选 AIRI 消息总线端口 6121 未启动，控制台有连接拒绝；一次嵌入检查还出现 ResizeObserver 提示及翻译回退警告。没有观察到模型加载错误，不能推断所有上游后端可用。
+- 上游受跟踪源码无修改。Electron、语音和嘴型同步仍未接入。完整操作见 [文字虚拟直播间](TEXT-ROOM.md)。
 
 ## 本轮结果
 

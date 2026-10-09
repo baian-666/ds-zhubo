@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { Scheduler } from './scheduler.mjs'
 import { Director } from './director.mjs'
 import { streamReply } from './deepseek.mjs'
+import { mockReply } from './mock.mjs'
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status }
@@ -45,9 +46,10 @@ function authorized(request, token) {
 
 export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = process.env.DEEPSEEK_MODEL || 'deepseek-flash', token = process.env.COHOST_ACCESS_TOKEN || '', scheduler = new Scheduler(), director = new Director({ scheduler }), reply = streamReply } = {}) {
   const page = readFileSync(new URL('./index.html', import.meta.url))
-  let history = []
+  const histories = { deepseek: [], mock: [] }
   scheduler.onDelivered = (input, answer) => {
-    history = [...history, { role: 'user', content: JSON.stringify(input) }, { role: 'assistant', content: answer }].slice(-12)
+    const engine = input.engine ?? 'deepseek'
+    histories[engine] = [...histories[engine], { role: 'user', content: JSON.stringify(input) }, { role: 'assistant', content: answer }].slice(-12)
   }
   const server = createServer(async (request, response) => {
     try {
@@ -58,16 +60,21 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
           'Cache-Control': 'no-store',
           'X-Content-Type-Options': 'nosniff',
           'Referrer-Policy': 'no-referrer',
-          'Content-Security-Policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+          'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; frame-src http://127.0.0.1:5173; frame-ancestors 'none'; base-uri 'none'",
         })
         response.end(page)
+        return
+      }
+      if (request.method === 'GET' && path === '/client.mjs') {
+        response.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' })
+        response.end(readFileSync(new URL('./client.mjs', import.meta.url)))
         return
       }
       if (path === '/healthz' && request.method === 'GET') { json(response, 200, { ok: true }); return }
       if (!path?.startsWith('/api/')) throw new HttpError(404, '未找到')
       if (!authorized(request, token)) throw new HttpError(401, '请填写正确的助播访问令牌')
       if (request.method === 'GET' && path === '/api/status') {
-        json(response, 200, { ...scheduler.status(), director: director.status(), deepseekConfigured: Boolean(apiKey), model, stage: '文字与导演事件原型；尚未连接语音和 AIRI' })
+        json(response, 200, { ...scheduler.status(), director: director.status(), deepseekConfigured: Boolean(apiKey), model, queue: scheduler.queue.map(({id,platform,userId,text,mentioned,selected,receivedAt}) => ({id,platform,userId,text,mentioned,selected,expiresAt:receivedAt + scheduler.ttlMs})), stage: '本机文字虚拟直播间；AIRI 网页舞台嵌入，语音尚未连接' })
         return
       }
       if (request.method !== 'POST') throw new HttpError(405, '请使用 POST')
@@ -106,8 +113,16 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
         director.reset('reset', { clearSpeech: true })
         scheduler.interrupt()
         scheduler.queue = []
-        history = []
+        histories.deepseek = []; histories.mock = []
         json(response, 200, scheduler.status())
+        return
+      }
+      if (path === '/api/danmaku/select') {
+        if (!['bilibili', 'wechat', 'manual'].includes(body.platform)) throw new HttpError(400, '平台无效')
+        const accepted = scheduler.selectViewer(body.platform, textField(body.id, 128))
+        if (!accepted) throw new HttpError(409, '弹幕已经过期或被消费')
+        director.invalidate('viewer_selected')
+        json(response, 200, { accepted, ...scheduler.status() })
         return
       }
       if (path === '/api/danmaku') {
@@ -121,7 +136,10 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
         return
       }
       if (path !== '/api/reply') throw new HttpError(404, '未找到')
-      if (!apiKey) throw new HttpError(503, '先在云环境网络密钥中配置 DEEPSEEK_API_KEY，再启动服务')
+      const engine = body.engine ?? 'deepseek'
+      if (!['deepseek', 'mock'].includes(engine)) throw new HttpError(400, 'engine 无效')
+      if (engine === 'deepseek' && !apiKey) throw new HttpError(503, '请在本机忽略的 .env 配置 DEEPSEEK_API_KEY 并重启，或选择模拟回复')
+      if (engine === 'mock' && body.delivery === 'audio') throw new HttpError(400, '模拟回复仅支持文字')
       if (!['host', 'viewer', 'director'].includes(body.source)) throw new HttpError(400, 'source 无效')
       if (body.delivery !== undefined && !['text', 'audio'].includes(body.delivery)) throw new HttpError(400, 'delivery 无效')
       if (body.source === 'director' && !Number.isSafeInteger(body.decision)) throw new HttpError(400, '需要 decision 编号')
@@ -129,6 +147,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       if (body.source !== 'director') director.invalidate('manual_reply')
       const turn = body.source === 'host' ? scheduler.beginHost(text) : body.source === 'director' ? director.consume(body.decision) : scheduler.beginViewer()
       if (!turn) throw new HttpError(409, '当前保持安静：主播在说话、已静音、正在回答、冷却中，或没有合适弹幕')
+      turn.input.engine = engine
       turn.delivery = body.delivery ?? 'text'
       response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' })
       const send = value => { if (!response.destroyed) response.write(`${JSON.stringify({ ...value, turn: turn.id, audioId: turn.audioId })}\n`) }
@@ -136,10 +155,10 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
         if (!response.writableEnded && scheduler.isCurrent(turn)) scheduler.interrupt()
       }
       response.on('close', disconnected)
-      send({ type: 'start', turn: turn.id, source: turn.input.source })
+      send({ type: 'start', engine, model: engine === 'mock' ? '模拟回复' : model, turn: turn.id, source: turn.input.source })
       let completed = false
       try {
-        for await (const chunk of reply({ apiKey, model, history: [...history], input: turn.input, signal: turn.controller.signal })) {
+        for await (const chunk of (engine === 'mock' ? mockReply : reply)({ apiKey, model, history: [...histories[engine]], input: turn.input, signal: turn.controller.signal })) {
           if (!scheduler.isCurrent(turn)) break
           turn.answer += chunk
           send({ type: 'delta', text: chunk })
@@ -175,7 +194,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (!['127.0.0.1', '::1', 'localhost'].includes(host) && (process.env.COHOST_ACCESS_TOKEN?.length ?? 0) < 24)
     throw new Error('Set COHOST_ACCESS_TOKEN (24+ characters) before binding beyond loopback.')
   const server = createApp()
-  server.listen(port, host, () => console.log(`文字联调台 http://${host}:${port} — 尚未连接语音、AIRI 或真实弹幕`))
+  server.listen(port, host, () => console.log(`文字联调台 http://${host}:${port} — 本机网页版虚拟直播间 · 语音与真实弹幕尚未接入`))
   const stop = () => { server.close(); server.closeAllConnections() }
   process.on('SIGTERM', stop)
   process.on('SIGINT', stop)

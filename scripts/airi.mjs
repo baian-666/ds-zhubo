@@ -9,18 +9,23 @@ const target = join(root, 'vendor', 'airi')
 const action = process.argv[2]
 
 function run(command, args, cwd = target, capture = false) {
+  if (command === 'pnpm' && process.platform === 'win32') {
+    const cli = process.env.PNPM_CLI_PATH || join(root, 'data/toolchains/pnpm-11.24.0/node_modules/pnpm/bin/pnpm.cjs')
+    if (!existsSync(cli)) throw new Error('Install the pinned pnpm locally. See docs/LOCAL-DEVELOPMENT.md.')
+    args = [cli, ...args]
+    command = process.execPath
+  }
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', stdio: capture ? 'pipe' : 'inherit' })
   if (result.error || result.status !== 0)
     throw new Error(`${command} failed. ${result.error?.message ?? result.stderr ?? ''}`)
   return result.stdout?.trim()
 }
 
-if (!['setup', 'dev'].includes(action)) throw new Error('Use setup or dev.')
-if (process.platform === 'win32') throw new Error('Run the AIRI setup in the Linux dev container or Codespaces.')
-if (process.versions.node !== lock.node) throw new Error(`Use Node ${lock.node} from the dev container.`)
+if (!['setup', 'setup-web', 'dev'].includes(action)) throw new Error('Use setup or dev.')
+if (process.versions.node !== lock.node) throw new Error(`Use Node ${lock.node} from the local toolchain.`)
 if (run('pnpm', ['--version'], root, true) !== lock.pnpm) throw new Error(`Use pnpm ${lock.pnpm}.`)
 
-if (action === 'setup') {
+if (action === 'setup' || action === 'setup-web') {
   mkdirSync(target, { recursive: true })
   if (!existsSync(join(target, '.git'))) {
     run('git', ['init'])
@@ -32,12 +37,15 @@ if (action === 'setup') {
     throw new Error('AIRI has local changes. Save them as reviewed patches before setup. Nothing was reset.')
   run('git', ['fetch', '--depth=1', 'origin', lock.commit])
   run('git', ['checkout', '--detach', lock.commit])
-  run('pnpm', ['install', '--frozen-lockfile'])
+  if (action === 'setup-web' || process.platform === 'win32') {
+    run('pnpm', ['--filter', '@proj-airi/stage-web...', 'install', '--frozen-lockfile', '--ignore-scripts'])
+    run('pnpm', ['-r', '--filter', '@proj-airi/stage-web^...', '--workspace-concurrency=2', '--if-present', 'run', 'build'])
+  } else run('pnpm', ['install', '--frozen-lockfile'])
 } else {
   if (!existsSync(join(target, '.git'))) throw new Error('Run npm run setup:airi first.')
   if (run('git', ['rev-parse', 'HEAD'], target, true) !== lock.commit) throw new Error('AIRI revision differs from airi.lock.json.')
   // Vite accepts only the current private Codespaces host, rather than every host.
   if (process.env.CODESPACE_NAME && process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN)
     process.env.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS = `${process.env.CODESPACE_NAME}-5173.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`
-  run('pnpm', ['-F', '@proj-airi/stage-web', 'dev', '--port', '5173', '--strictPort'])
+  run('pnpm', ['-F', '@proj-airi/stage-web', 'exec', 'vite', '--host', '127.0.0.1', '--port', '5173', '--strictPort'])
 }
