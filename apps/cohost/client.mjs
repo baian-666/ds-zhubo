@@ -162,3 +162,12 @@ $('stage').addEventListener('load',() => { $('stageState').textContent='已加�
 setInterval(() => { if(!refreshing) void refresh().catch(error => { $('status').textContent=error.message }) },400)
 setInterval(() => { if($('simulate').checked) { const options=[...$('preset').options]; void safe(() => enqueue(options[simulatedNumber%options.length].text,true)) } },5000)
 void safe(refresh)
+
+function expandStage(value) {
+  $('stagePanel').classList.toggle('expanded', value)
+  document.body.classList.toggle('stageExpanded', value)
+  $('expandStage').setAttribute('aria-expanded', String(value))
+  $('expandStage').textContent = value ? '收起舞台' : '放大舞台'
+}
+$('expandStage').addEventListener('click', () => expandStage(!$('stagePanel').classList.contains('expanded')))
+document.addEventListener('keydown', event => { if (event.key === 'Escape') expandStage(false) })
