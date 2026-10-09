@@ -17,6 +17,7 @@ const waitResult=async pattern=>page.waitForFunction(pattern=>new RegExp(pattern
 try {
   await page.goto(base)
   await page.locator('#status').filter({hasText:'队列'}).waitFor()
+  await page.locator('#engine').selectOption('mock')
   await page.locator('#hostSubmit').click()
   await page.waitForTimeout(600)
   assert.equal(requests,0,'manual speech must not invoke generation')

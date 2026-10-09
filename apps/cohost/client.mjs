@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id)
 let state, utterance, activeRequest = null, activeTurn = null, refreshing = false, submitting = false
-let seenTrace = 0, attemptedDecision = 0, simulatedNumber = 0
+let seenTrace = 0, attemptedDecision = 0, simulatedNumber = 0, blockedDecision = 0
 const reasons = {
   mode_changed: '导演模式改变，旧机会作废', host_voice_detected: '听到主播活动，先观察，不直接打断',
   transcript_updated: '主播文本更新，旧判断作废', short_acknowledgment: '短附和，保留助播话轮',
@@ -63,18 +63,26 @@ async function refresh() {
     autoReply()
   } finally { refreshing = false }
 }
+
 function autoReply() {
-    const candidate = state?.director?.candidate
-    if (!submitting && !activeRequest && state.director.mode === 'auto' && ($('engine').value === 'mock' || state.deepseekConfigured) && candidate && candidate.id > attemptedDecision) {
-      attemptedDecision = candidate.id
-      void generate('director', candidate.id)
+  const candidate = state?.director?.candidate
+  if (submitting || activeRequest || state?.director?.mode !== 'auto' || !candidate || candidate.id <= attemptedDecision) return
+  if ($('engine').value === 'deepseek' && !state.deepseekConfigured) {
+    if (blockedDecision !== candidate.id) {
+      blockedDecision = candidate.id
+      feedback('导演已允许接话，但本机未配置 DeepSeek 密钥。请把“回复”切换为“模拟回复”，或直接点“一键模拟试跑”。')
+      trace('等待', 'DeepSeek 未配置，未调用模型')
     }
+    return
+  }
+  attemptedDecision = candidate.id
+  void generate('director', candidate.id)
 }
 async function generate(source, decision) {
-  if (activeRequest) { $('result').textContent = '已有回答，先打断或等待完成'; return }
+  if (activeRequest) { feedback('已有回答，先打断或等待完成'); return }
   const controller = new AbortController(); activeRequest = controller; activeTurn = null
   const started = performance.now(), engine = $('engine').value
-  $('answer').textContent = ''; $('result').textContent = '正在接话…'; $('latency').textContent = '首字：等待'
+  $('answer').textContent = ''; feedback('正在接话…'); $('latency').textContent = '首字：等待'
   $('replyLabel').textContent = engine === 'mock' ? '模拟回复 · 无 API 调用' : `DeepSeek · ${state?.model ?? ''}`
   $('manualReply').disabled = $('viewerReply').disabled = true
   trace('请求', `${source === 'director' ? '自动导演' : '人工导演'} · ${engine === 'mock' ? '模拟回复' : 'DeepSeek'}`)
@@ -97,7 +105,7 @@ async function generate(source, decision) {
         }
         if (['done','cancelled','error'].includes(item.type)) {
           ended=true
-          $('result').textContent = item.type === 'done' ? '文字回答完成' : item.type === 'cancelled' ? '已打断，未完成回复不进入上下文' : item.message
+          feedback(item.type === 'done' ? '文字回答完成' : item.type === 'cancelled' ? '已打断，未完成回复不进入上下文' : item.message)
           trace(item.type === 'done' ? '完成' : item.type === 'cancelled' ? '打断' : '失败', $('result').textContent)
         }
       }
@@ -105,7 +113,7 @@ async function generate(source, decision) {
     }
     if (!ended) throw new Error('连接中断，回答未完成')
   } catch(error) {
-    $('result').textContent=error.name==='AbortError' ? '已打断，旧回答已废弃' : error.message
+    feedback(error.name==='AbortError' ? '已打断，旧回答已废弃' : error.message)
     trace(error.name==='AbortError' ? '打断' : '失败', $('result').textContent)
   } finally {
     if (activeRequest === controller) { activeRequest=null; activeTurn=null }
@@ -129,6 +137,8 @@ async function speakLine() {
     await finishText()
     await event({type:'speech-end',utterance})
     trace('主播', $('hostText').value)
+    if (state.director.mode === 'manual') feedback('主播文字已提交。人工导演不会自动回复，请点右侧“人工让助播接话”。')
+    else if (!state.director.candidate) feedback(state.director.intent === 'backchannel' ? '这句是短附和，保留助播当前回答。' : state.director.intent === 'stop' ? '主播要求停止，当前回答已打断。' : '导演决定等待：这句没有明确交棒，所以不回复。想看接话效果，点“一键模拟试跑”。')
   } finally { submitting=false; autoReply() }
 }
 async function enqueue(text, simulated=false) {
@@ -137,7 +147,7 @@ async function enqueue(text, simulated=false) {
     mentioned:simulated ? text.startsWith('助播') : $('mentioned').checked,selected:false})).json()
   trace('弹幕', result.accepted ? text : '重复消息已忽略')
 }
-async function safe(action) { try { await action(); await refresh() } catch(error) { $('result').textContent=error.message; trace('提示',error.message) } }
+async function safe(action) { try { await action(); await refresh() } catch(error) { feedback(error.message); trace('提示',error.message) } }
 function bind(id, action, name='click') { $(id).addEventListener(name,() => safe(action)) }
 bind('hostSubmit', speakLine)
 bind('manualReply', () => generate('host'))
@@ -171,3 +181,26 @@ function expandStage(value) {
 }
 $('expandStage').addEventListener('click', () => expandStage(!$('stagePanel').classList.contains('expanded')))
 document.addEventListener('keydown', event => { if (event.key === 'Escape') expandStage(false) })
+
+function feedback(message) {
+  $('result').textContent = message
+  $('testFeedback').textContent = message
+}
+
+
+async function runQuickTrial(engine) {
+  if (activeRequest || state?.busy) throw new Error('请先点“打断助播”，再试聊。')
+  if (engine === 'deepseek' && !state?.deepseekConfigured)
+    throw new Error('本机还没有 DeepSeek 密钥。请在本机 .env 填入 DEEPSEEK_API_KEY 并重启文字服务；密钥不要填在 AIRI 页面或聊天中。')
+  $('engine').value = engine
+  await api('mute', { value: false })
+  await api('host-speaking', { value: false })
+  await event({ type: 'viewer-window', value: false })
+  await event({ type: 'mode', value: 'auto' })
+  $('scenario').value = 'handover'
+  $('hostText').value = scenarios.handover
+  feedback(engine === 'deepseek' ? '正在向 DeepSeek 提交试聊，回复会显示在字幕里，不会出声。' : '正在用模拟回复试跑，稍后会看到文字字幕，不会出声。')
+  await speakLine()
+}
+bind('quickDemo', () => runQuickTrial('mock'))
+bind('quickReal', () => runQuickTrial('deepseek'))
