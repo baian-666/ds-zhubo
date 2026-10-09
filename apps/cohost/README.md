@@ -5,6 +5,7 @@
 | 文件 | 作用 |
 |---|---|
 | `scheduler.mjs` | 主播优先、取消信号、消息队列、去重与冷却 |
+| `director.mjs` | 快速话轮判断、异步语义接口、候选过期与主动参与预算 |
 | `deepseek.mjs` | 服务端 DeepSeek 流式调用与 SSE 解析 |
 | `server.mjs` | HTTP 输入验证、权限、短期上下文与响应流 |
 | `index.html` | 手动模拟主播与观众事件 |
@@ -21,6 +22,6 @@
 | `POST /api/reset` | `{}`，清上下文与队列，保留限流状态 |
 | `POST /api/danmaku` | `{ "id": "1", "platform": "bilibili", "userId": "viewer-1", "text": "你怎么看", "mentioned": true, "selected": false }` |
 
-回复流为 NDJSON，事件有 `start`、`delta`、`done`、`cancelled`、`error`。打断只控制当前文字生成。未来音频播放器还必须响应取消事件并报告已播放进度。
+回复流为 NDJSON，事件有 `start`、`delta`、`done`、`cancelled`、`error`，均携带话轮和音频标识。文字模式保留原流程；`delivery:audio` 在生成结束后等待实际播放回执，尚未接真实音频。新增 `/api/director/event` 和 `/api/playback`，协议、模拟方式及局限见 [话轮导演](../../docs/TURN-DIRECTOR.md)。
 
 此原型不适合直接公开提供多人服务，不包含平台连接器、自动语义评分、持久化或播出内容审核流程。

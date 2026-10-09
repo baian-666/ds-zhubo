@@ -1,0 +1,43 @@
+[
+  {
+    "name": "明确交棒后接话",
+    "events": [
+      {"type":"mode","value":"auto"},
+      {"type":"speech-start","utterance":1},
+      {"type":"transcript","utterance":1,"text":"助播，你怎么看？","final":true},
+      {"type":"speech-end","utterance":1,"at":900}
+    ],
+    "expect": {"candidate":true,"busy":false,"intent":"handover"}
+  },
+  {
+    "name": "句中停顿继续听",
+    "events": [
+      {"type":"mode","value":"auto"},
+      {"type":"speech-start","utterance":1},
+      {"type":"transcript","utterance":1,"text":"这件事的关键其实是","final":false},
+      {"type":"speech-end","utterance":1,"at":1000}
+    ],
+    "expect": {"candidate":false,"busy":false,"intent":"hold"}
+  },
+  {
+    "name": "短附和保留回答",
+    "seedReply": "先解释一下",
+    "events": [
+      {"type":"mode","value":"auto"},
+      {"type":"speech-start","utterance":1},
+      {"type":"transcript","utterance":1,"text":"对","final":true},
+      {"type":"speech-end","utterance":1,"at":250}
+    ],
+    "expect": {"candidate":false,"busy":true,"intent":"backchannel"}
+  },
+  {
+    "name": "明确打断立即取消",
+    "seedReply": "先解释一下",
+    "events": [
+      {"type":"mode","value":"auto"},
+      {"type":"speech-start","utterance":1},
+      {"type":"transcript","utterance":1,"text":"先听我说！","final":true}
+    ],
+    "expect": {"candidate":false,"busy":false,"intent":"stop"}
+  }
+]

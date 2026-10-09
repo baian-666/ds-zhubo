@@ -28,10 +28,22 @@
 <button id="enqueue">加入候选队列</button><button id="viewerReply">挑一条回复</button>
 <p>默认全局冷却 20 秒，同一观众冷却 60 秒，消息 20 秒过期。</p>
 </section>
+<section>
+<h2>话轮导演 · 模拟事件</h2>
+<p>这里模拟识别结果与讲话动作，不采集麦克风。先开始讲话、提交识别文本，再结束讲话；只有点击“按导演决定接话”才会调用 DeepSeek。</p>
+<label>导演模式 <select id="directorMode"><option value="manual">人工导演</option><option value="auto">自动导演（规则原型）</option></select></label>
+<textarea id="transcript" placeholder="明确交棒示例：助播，你怎么看？"></textarea>
+<button id="speechStart">模拟开始讲话</button><button id="transcriptFinal">提交最终识别文本</button><button id="speechEnd">模拟结束讲话</button>
+<label>模拟语义判断（由你指定，尚未接语义模型） <select id="intent"><option value="hold">继续听</option><option value="backchannel">主播短附和</option><option value="takeover">主播接管</option><option value="handover">交棒给助播</option><option value="opportunity">适合主动补充</option></select></label>
+<button id="semantic">提交模拟判断</button><button id="topicChange">模拟话题切换</button><button id="directorReply">按导演决定接话</button>
+<pre id="directorState">等待事件</pre>
+</section>
 <button id="reset">清空本场文字上下文和队列</button>
 <script type="module">
 const $ = id => document.getElementById(id)
 let activeRequest = null
+let directorState = null
+let utterance = null
 function headers() { return {'Content-Type':'application/json', ...($('token').value ? {Authorization:`Bearer ${$('token').value}`} : {})} }
 async function api(path, body, signal) {
   const response = await fetch(`/api/${path}`, {method:body === undefined ? 'GET':'POST',headers:headers(),body:body === undefined ? undefined:JSON.stringify(body),signal})
@@ -43,9 +55,12 @@ async function refresh() {
   $('status').textContent = `${state.deepseekConfigured ? 'DeepSeek 已配置（连通性待调用确认）':'DeepSeek 未配置'} · 队列 ${state.queued} · ${state.busy ? '正在回答':state.muted ? '保持安静':state.hostSpeaking ? '正在听主播':'等待接话'}`
   $('speaking').checked = state.hostSpeaking
   $('muted').checked = state.muted
+  directorState = state.director
+  $('directorMode').value = directorState.mode
+  $('directorState').textContent = JSON.stringify(directorState, null, 2)
 }
-function bind(id, action) {
-  $(id).addEventListener('click', async () => {
+function bind(id, action, eventName = 'click') {
+  $(id).addEventListener(eventName, async () => {
     try { await action(); await refresh() } catch (error) { $('result').textContent = error.message }
   })
 }
@@ -57,7 +72,7 @@ async function generate(source) {
   $('answer').textContent = ''
   $('result').textContent = '正在接话…'
   try {
-    const response = await api('reply',{source,text:$('hostText').value},controller.signal)
+    const response = await api('reply',{source,text:$('hostText').value, ...(source === 'director' ? {decision:directorState?.candidate?.id} : {})},controller.signal)
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
@@ -88,6 +103,16 @@ async function generate(source) {
 bind('refresh',refresh)
 bind('reply',() => generate('host'))
 bind('viewerReply',() => generate('viewer'))
+bind('directorReply',() => generate('director'))
+bind('directorMode',() => api('director/event',{type:'mode',value:$('directorMode').value}), 'change')
+bind('speechStart',async () => {
+  utterance = Math.max(Date.now(), (utterance ?? 0) + 1, (directorState?.utterance ?? 0) + 1)
+  await api('director/event',{type:'speech-start',utterance})
+})
+bind('transcriptFinal',() => api('director/event',{type:'transcript',utterance,text:$('transcript').value,final:true}))
+bind('speechEnd',() => api('director/event',{type:'speech-end',utterance}))
+bind('semantic',() => api('director/event',{type:'intent',revision:directorState?.revision,intent:$('intent').value,confidence:1}))
+bind('topicChange',() => api('director/event',{type:'topic-change'}))
 bind('interrupt',async () => { activeRequest?.abort(); await api('interrupt',{}) })
 bind('speaking',() => api('host-speaking',{value:$('speaking').checked}))
 bind('muted',() => api('mute',{value:$('muted').checked}))
