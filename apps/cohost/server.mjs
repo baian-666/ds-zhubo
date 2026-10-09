@@ -6,6 +6,7 @@ import { Scheduler } from './scheduler.mjs'
 import { Director } from './director.mjs'
 import { streamReply } from './deepseek.mjs'
 import { mockReply } from './mock.mjs'
+import { RoomJournal } from './room-journal.mjs'
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status }
@@ -47,6 +48,16 @@ function authorized(request, token) {
 export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = process.env.DEEPSEEK_MODEL || 'deepseek-flash', token = process.env.COHOST_ACCESS_TOKEN || '', scheduler = new Scheduler(), director = new Director({ scheduler }), reply = streamReply } = {}) {
   const page = readFileSync(new URL('./index.html', import.meta.url))
   const histories = { deepseek: [], mock: [] }
+  const room = new RoomJournal()
+  director.onRecord = entry => {
+    const previous = room.entries.at(-1)
+    // The transcript and speech-end can repeat one rule decision; show one explanation.
+    if (previous?.role === 'director' && previous.reason === entry.reason &&
+      previous.action === entry.action && previous.directorRevision === entry.revision) return
+    room.add('director', '', { action: entry.action, reason: entry.reason, traceId: entry.id,
+      directorRevision: entry.revision, at: entry.at })
+  }
+  director.onTranscript = ({ text, utterance }) => room.host(text, utterance)
   scheduler.onDelivered = (input, answer) => {
     const engine = input.engine ?? 'deepseek'
     histories[engine] = [...histories[engine], { role: 'user', content: JSON.stringify(input) }, { role: 'assistant', content: answer }].slice(-12)
@@ -74,7 +85,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       if (!path?.startsWith('/api/')) throw new HttpError(404, '未找到')
       if (!authorized(request, token)) throw new HttpError(401, '请填写正确的助播访问令牌')
       if (request.method === 'GET' && path === '/api/status') {
-        json(response, 200, { ...scheduler.status(), director: director.status(), deepseekConfigured: Boolean(apiKey), model, queue: scheduler.queue.map(({id,platform,userId,text,mentioned,selected,receivedAt}) => ({id,platform,userId,text,mentioned,selected,expiresAt:receivedAt + scheduler.ttlMs})), stage: '本机文字虚拟直播间；AIRI 网页舞台嵌入，语音尚未连接' })
+        json(response, 200, { ...scheduler.status(), director: director.status(), deepseekConfigured: Boolean(apiKey), model, room: room.status(), queue: scheduler.queue.map(({id,platform,userId,text,mentioned,selected,receivedAt}) => ({id,platform,userId,text,mentioned,selected,expiresAt:receivedAt + scheduler.ttlMs})), stage: '本机文字虚拟直播间；AIRI 网页舞台嵌入，语音尚未连接' })
         return
       }
       if (request.method !== 'POST') throw new HttpError(405, '请使用 POST')
@@ -84,7 +95,11 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       const body = await readBody(request)
       if (path === '/api/director/event') {
         const state = director.event(body)
-        json(response, 200, { director: state, ...scheduler.status() })
+        if (body.type === 'speech-end' && director.mode === 'manual' && director.utterance?.id === body.utterance &&
+          director.utterance.final && !['stop', 'backchannel'].includes(director.intent) &&
+          !room.entries.some(x => x.reason === 'manual_wait' && x.utterance === body.utterance))
+          room.add('director', '', { action: 'hold', reason: 'manual_wait', utterance: body.utterance })
+        json(response, 200, { director: state, ...scheduler.status(), room: room.status() })
         return
       }
       if (path === '/api/playback') {
@@ -110,6 +125,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
         return
       }
       if (path === '/api/reset') {
+        room.clear()
         director.reset('reset', { clearSpeech: true })
         scheduler.interrupt()
         scheduler.queue = []
@@ -132,7 +148,17 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
           userId: textField(body.userId, 128), text: textField(body.text, 500),
           mentioned: body.mentioned === true, selected: body.selected === true,
         }
-        json(response, 200, { accepted: scheduler.enqueue(message), ...scheduler.status() })
+        const accepted = scheduler.enqueue(message)
+        if (accepted) {
+          room.add('viewer', message.text, { userId: message.userId, platform: message.platform, messageId: message.id })
+          const reason = director.mode === 'manual' ? 'viewer_manual_wait' :
+            !director.viewerWindow ? 'viewer_window_closed' :
+            scheduler.hostSpeaking ? 'viewer_host_speaking' :
+            scheduler.active ? 'viewer_busy' :
+            !scheduler.peekViewer() ? 'viewer_ineligible' : null
+          if (reason) room.add('director', '', { action: 'hold', reason })
+        }
+        json(response, 200, { accepted, ...scheduler.status(), room: room.status() })
         return
       }
       if (path !== '/api/reply') throw new HttpError(404, '未找到')
@@ -144,32 +170,45 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       if (body.delivery !== undefined && !['text', 'audio'].includes(body.delivery)) throw new HttpError(400, 'delivery 无效')
       if (body.source === 'director' && !Number.isSafeInteger(body.decision)) throw new HttpError(400, '需要 decision 编号')
       const text = body.source === 'host' ? textField(body.text) : null
+      if (body.source === 'host') room.host(text, director.utterance?.final && director.utterance.text === text ? director.utterance.id : null)
       if (body.source !== 'director') director.invalidate('manual_reply')
       const turn = body.source === 'host' ? scheduler.beginHost(text) : body.source === 'director' ? director.consume(body.decision) : scheduler.beginViewer()
       if (!turn) throw new HttpError(409, '当前保持安静：主播在说话、已静音、正在回答、冷却中，或没有合适弹幕')
       turn.input.engine = engine
       turn.delivery = body.delivery ?? 'text'
+      const answerSession = room.session
+      const generatedAt = Date.now()
+      const answerEntry = room.add('assistant', '', { turn: turn.id, engine, model: engine === 'mock' ? '模拟回复' : model,
+        source: turn.input.source, replyingTo: turn.input.text, status: 'generating', firstMs: null })
+      const updateAnswer = fields => room.update(answerEntry, fields)
       response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' })
       const send = value => { if (!response.destroyed) response.write(`${JSON.stringify({ ...value, turn: turn.id, audioId: turn.audioId })}\n`) }
       const disconnected = () => {
         if (!response.writableEnded && scheduler.isCurrent(turn)) scheduler.interrupt()
+        if (!response.writableEnded) updateAnswer({ status: 'cancelled' })
       }
       response.on('close', disconnected)
-      send({ type: 'start', engine, model: engine === 'mock' ? '模拟回复' : model, turn: turn.id, source: turn.input.source })
+      send({ type: 'start', engine, model: engine === 'mock' ? '模拟回复' : model, turn: turn.id, source: turn.input.source, entry: { ...answerEntry }, session: answerSession })
       let completed = false
       try {
         for await (const chunk of (engine === 'mock' ? mockReply : reply)({ apiKey, model, history: [...histories[engine]], input: turn.input, signal: turn.controller.signal })) {
           if (!scheduler.isCurrent(turn)) break
           turn.answer += chunk
-          send({ type: 'delta', text: chunk })
+          updateAnswer({ text: turn.answer, firstMs: answerEntry.firstMs ?? Date.now() - generatedAt })
+          send({ type: 'delta', text: chunk, entry: { ...answerEntry }, session: answerSession })
         }
         if (scheduler.isCurrent(turn)) {
           completed = true
-          send({ type: 'done', awaitingPlayback: turn.delivery === 'audio' })
-        } else send({ type: 'cancelled' })
+          updateAnswer({ status: turn.delivery === 'audio' ? 'awaitingPlayback' : 'completed' })
+          send({ type: 'done', awaitingPlayback: turn.delivery === 'audio', entry: { ...answerEntry }, session: answerSession })
+        } else {
+          updateAnswer({ status: 'cancelled' })
+          send({ type: 'cancelled', entry: { ...answerEntry }, session: answerSession })
+        }
       } catch (error) {
-        if (turn.controller.signal.aborted) send({ type: 'cancelled' })
-        else send({ type: 'error', message: error.name === 'TimeoutError' ? '模型响应超时，请稍后重试' : '模型调用失败，请检查服务端密钥、额度和网络' })
+        const message = error.name === 'TimeoutError' ? '模型响应超时，请稍后重试' : '模型调用失败，请检查服务端密钥、额度和网络'
+        updateAnswer({ status: turn.controller.signal.aborted ? 'cancelled' : 'failed', error: turn.controller.signal.aborted ? undefined : message })
+        send({ type: turn.controller.signal.aborted ? 'cancelled' : 'error', message, entry: { ...answerEntry }, session: answerSession })
       } finally {
         if (completed) scheduler.finish(turn)
         else if (scheduler.isCurrent(turn)) scheduler.interrupt()

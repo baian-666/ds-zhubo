@@ -1,4 +1,6 @@
 const $ = id => document.getElementById(id)
+const savedEngine = sessionStorage.getItem('replyEngine')
+if (['deepseek','mock'].includes(savedEngine)) $('engine').value = savedEngine
 let state, utterance, activeRequest = null, activeTurn = null, refreshing = false, submitting = false
 let seenTrace = 0, attemptedDecision = 0, simulatedNumber = 0, blockedDecision = 0
 const reasons = {
@@ -23,12 +25,14 @@ function trace(action, text, at = Date.now()) {
 }
 function headers() { return {'Content-Type':'application/json', ...($('token').value ? {Authorization:`Bearer ${$('token').value}`} : {})} }
 async function api(path, body, signal) {
+  const sequence = ++requestSequence
   const response = await fetch(`/api/${path}`, {method:body === undefined ? 'GET':'POST',headers:headers(),body:body === undefined ? undefined:JSON.stringify(body),signal})
   if (!response.ok) { const error = new Error((await response.json()).error); error.status = response.status; throw error }
+  response.taskSequence = sequence
   return response
 }
 async function event(body) {
-  const result = await (await api('director/event',body)).json()
+  const result = await data(await api('director/event',body))
   state = { ...state, ...result }
   if (activeTurn !== null && result.turn > activeTurn) activeRequest?.abort()
   if (!submitting) autoReply()
@@ -51,7 +55,7 @@ async function refresh() {
   if (refreshing) return
   refreshing = true
   try {
-    state = await (await api('status')).json()
+    state = await data(await api('status'))
     $('status').textContent = `${state.deepseekConfigured ? 'DeepSeek 已配置 · 连通性待调用确认' : 'DeepSeek 未配置 · 可用模拟回复'} · ${state.model} · 队列 ${state.queued} · ${state.muted ? '静音' : state.hostSpeaking ? '倾听主播' : state.busy ? '助播回答中' : '等待参与机会'}`
     $('mode').value = state.director.mode; $('muted').checked = state.muted; $('speaking').checked = state.hostSpeaking
     $('viewerWindow').checked = state.director.viewerWindow
@@ -70,7 +74,7 @@ function autoReply() {
   if ($('engine').value === 'deepseek' && !state.deepseekConfigured) {
     if (blockedDecision !== candidate.id) {
       blockedDecision = candidate.id
-      feedback('导演已允许接话，但本机未配置 DeepSeek 密钥。请把“回复”切换为“模拟回复”，或直接点“一键模拟试跑”。')
+      feedback('导演已允许接话，但本机未配置 DeepSeek 密钥。请把“回复”切换为“模拟回复”，或直接点“先看模拟效果”。')
       trace('等待', 'DeepSeek 未配置，未调用模型')
     }
     return
@@ -98,9 +102,10 @@ async function generate(source, decision) {
       while ((at = buffer.indexOf('\n')) >= 0) {
         const item = JSON.parse(buffer.slice(0,at)); buffer = buffer.slice(at+1)
         if (item.type === 'start') activeTurn = item.turn
+        if (!controller.signal.aborted && item.entry && item.session === roomSession) renderMessage(item.entry)
         if (item.type === 'delta') {
           if (controller.signal.aborted) break
-          if (first) { const ms=Math.round(performance.now()-started); $('latency').textContent=`首字：${ms} ms`; trace('首字',`${ms} ms · ${engine}`); first=false }
+          if (first) { const ms=Math.round(performance.now()-started); $('latency').textContent=`生成首字：${item.entry?.firstMs ?? ms} ms`; trace('首字',`${ms} ms · ${engine}`); first=false }
           $('answer').textContent += item.text
         }
         if (['done','cancelled','error'].includes(item.type)) {
@@ -138,17 +143,145 @@ async function speakLine() {
     await event({type:'speech-end',utterance})
     trace('主播', $('hostText').value)
     if (state.director.mode === 'manual') feedback('主播文字已提交。人工导演不会自动回复，请点右侧“人工让助播接话”。')
-    else if (!state.director.candidate) feedback(state.director.intent === 'backchannel' ? '这句是短附和，保留助播当前回答。' : state.director.intent === 'stop' ? '主播要求停止，当前回答已打断。' : '导演决定等待：这句没有明确交棒，所以不回复。想看接话效果，点“一键模拟试跑”。')
+    else if (!state.director.candidate) feedback(state.director.intent === 'backchannel' ? '这句是短附和，保留助播当前回答。' : state.director.intent === 'stop' ? '主播要求停止，当前回答已打断。' : '导演决定等待：这句没有明确交棒，所以不回复。想看接话效果，点“先看模拟效果”。')
   } finally { submitting=false; autoReply() }
 }
 async function enqueue(text, simulated=false) {
-  const result = await (await api('danmaku',{id:crypto.randomUUID(),platform:$('platform').value,
+  const result = await data(await api('danmaku',{id:crypto.randomUUID(),platform:$('platform').value,
     userId: simulated ? `sim-${++simulatedNumber}` : $('userId').value,text,
-    mentioned:simulated ? text.startsWith('助播') : $('mentioned').checked,selected:false})).json()
+    mentioned:simulated ? text.startsWith('助播') : $('mentioned').checked,selected:false}))
   trace('弹幕', result.accepted ? text : '重复消息已忽略')
 }
 async function safe(action) { try { await action(); await refresh() } catch(error) { feedback(error.message); trace('提示',error.message) } }
 function bind(id, action, name='click') { $(id).addEventListener(name,() => safe(action)) }
+
+// All director and assistant messages share the same visible character.
+let roomSession = null, roomVersion = -1, lastRoomSequence = 0
+const messageNodes = new Map()
+const decisionLabels = { manual_reply:'人工接话', manual_interrupt:'打断', reset:'重置', mode_changed:'切换模式',
+  manual_mute_changed:'调整静音', viewer_window_changed:'调整弹幕窗口', topic_changed:'切换话题', viewer_selected:'选择弹幕',
+  decision_consumed:'接话', viewer_decision_consumed:'回复弹幕' }
+const processReasons = new Set(['host_voice_detected','transcript_updated','decision_consumed','viewer_decision_consumed','manual_host_override'])
+const directorWords = {
+  mode_changed: '发言时机已切换。人工模式由你让我接话；自动模式由我观察交棒机会。',
+  host_voice_detected: '我听到你开始讲话，先观察；普通附和不会直接打断我的回答。',
+  transcript_updated: '我收到更新的主播文字，正在重新判断。',
+  short_acknowledgment: '这句是短附和，我会继续当前回答。',
+  exact_stop_phrase: '你明确让我停一下，我现在停止这轮回答。',
+  explicit_address: '你点名把话交给我，而且已经说完了，我来接话。',
+  needs_semantic_evidence: '我先等你说完。这句没有明确交棒证据，我暂时不接话。',
+  decision_consumed: '这次交棒已处理，开始生成回复，不重复接话。',
+  viewer_window_changed: '弹幕发言窗口已调整。我还会检查主播活动、冷却和消息是否过期。',
+  viewer_window_open: '现在主播空闲，这条弹幕也符合条件，我来回复它。',
+  viewer_decision_consumed: '这条弹幕已进入回复，不重复消费。',
+  viewer_selected: '你点选了弹幕，我会优先考虑它。',
+  topic_changed: '话题已切换，我清掉旧弹幕和旧接话机会。',
+  manual_interrupt: '你按了打断，我停止这轮回答。',
+  manual_mute_changed: '静音设置已改变，我会按新的设置决定能否发言。',
+  manual_reply: '你让我接话，我按人工指令准备回答。',
+  manual_wait: '现在是人工导演模式。我已听到这句，等你点“人工让助播接话”。',
+  adapter: '我收到了你指定的模拟语义，并据此调整接话决定。',
+  semantic: '异步语义判断已返回，我据此调整接话决定。',
+  semantic_timeout: '语义判断超时，我继续等待。',
+  semantic_unavailable: '语义判断暂不可用，我继续等待。',
+  explicit_interrupt: '收到明确的打断指令，我停止这轮回答。',
+  reset: '本场聊天和模型上下文已清空，我们重新开始。',
+  viewer_manual_wait: '我看到弹幕了。现在是人工导演模式，等你点“人工挑一条回复”。',
+  viewer_window_closed: '我看到弹幕了，但弹幕接话窗口还没打开。需要时勾选“自动导演允许回复弹幕”。',
+  viewer_host_speaking: '我看到弹幕了，但主播还在讲话，我先等一个空闲机会。',
+  viewer_busy: '我先把当前回答说完，之后再考虑这条弹幕。',
+  viewer_ineligible: '这条弹幕暂时不能回复。我会检查静音、提问或点选状态、20 秒全局冷却和 60 秒同观众冷却。',
+
+}
+function pinnedToBottom() {
+  const box = $('chatScroll')
+  return box.scrollHeight - box.scrollTop - box.clientHeight < 70
+}
+function renderMessage(entry) {
+  let node = messageNodes.get(entry.id)
+  if (node && node.revision >= entry.revision) return
+  const pinned = pinnedToBottom()
+  if (!node) {
+    const item = document.createElement('li')
+    const avatar = document.createElement('div'); avatar.className = 'avatar'; avatar.setAttribute('aria-hidden','true')
+    const body = document.createElement('div'); body.className = 'messageBody'
+    const meta = document.createElement('div'); meta.className = 'messageMeta'
+    const sender = document.createElement('strong'), badge = document.createElement('span'), time = document.createElement('time')
+    badge.className = 'badge'; meta.append(sender,badge,time)
+    const quote = document.createElement('div'); quote.className = 'replyContext'
+    const bubble = document.createElement('div'); bubble.className = 'bubble'
+    const status = document.createElement('div'); status.className = 'messageState'
+    body.append(meta,quote,bubble,status); item.append(avatar,body)
+    node = {item,avatar,sender,badge,time,quote,bubble,status,revision:-1}
+    messageNodes.set(entry.id,node)
+    const following = [...$('messages').children].find(x => Number(x.dataset.id) > entry.id)
+    $('messages').insertBefore(item, following ?? null)
+  }
+  roomVersion = Math.max(roomVersion, entry.revision)
+  node.revision = entry.revision
+  node.item.className = 'message ' + entry.role + (processReasons.has(entry.reason) ? ' process' : '')
+  node.item.dataset.id = entry.id
+  node.avatar.textContent = ['assistant','director'].includes(entry.role) ? '助' : entry.role === 'host' ? '主' : '弹'
+  node.sender.textContent = entry.role === 'viewer' ? (entry.userId || '观众') : entry.role === 'host' ? '主播' : '助播'
+  node.badge.textContent = entry.role === 'director' ? '导演决定 · ' + (decisionLabels[entry.reason] ?? actions[entry.action] ?? entry.action) :
+    entry.role === 'assistant' ? '助播回复' : entry.role === 'viewer' ? '模拟弹幕' : '模拟发言'
+  node.time.textContent = new Date(entry.at).toLocaleTimeString('zh-CN',{hour12:false})
+  node.time.dateTime = new Date(entry.at).toISOString()
+  node.quote.hidden = entry.role !== 'assistant' || !entry.replyingTo
+  node.quote.textContent = entry.replyingTo ? '回复：' + entry.replyingTo : ''
+  node.bubble.textContent = entry.role === 'director' ? (directorWords[entry.reason] ?? reasons[entry.reason] ?? entry.reason) :
+    entry.text || (entry.status === 'generating' ? '正在想怎么回答…' : entry.status === 'cancelled' ? '还没说出文字就被打断了。' : '没有收到回复文字。')
+  const labels = {generating:'正在回复…',completed:'回答完成',cancelled:'已打断 · 保留可见片段',failed:'调用失败',awaitingPlayback:'等待播放反馈'}
+  node.status.textContent = entry.role === 'assistant' ?
+    [entry.engine === 'mock' ? '模拟回复 · 无 API 调用' : entry.model, entry.firstMs === null ? '' : '生成首字 ' + entry.firstMs + ' ms', labels[entry.status], entry.error].filter(Boolean).join(' · ') : ''
+  node.status.hidden = !node.status.textContent
+  $('chatEmpty').hidden = messageNodes.size > 0
+  if (pinned) $('chatScroll').scrollTop = $('chatScroll').scrollHeight
+}
+function renderRoom(room, sequence = 0) {
+  if (!room || (sequence && sequence < lastRoomSequence)) return
+  if (sequence) lastRoomSequence = sequence
+  if (room.session !== roomSession) {
+    roomSession = room.session; roomVersion = -1
+    messageNodes.clear(); $('messages').replaceChildren(); $('chatEmpty').hidden = false
+  }
+  if (room.version < roomVersion) return
+  roomVersion = room.version
+  const ids = new Set(room.entries.map(x => x.id))
+  for (const [id,node] of messageNodes) if (!ids.has(id)) {node.item.remove(); messageNodes.delete(id)}
+  for (const entry of room.entries) renderMessage(entry)
+  const lastAnswer = room.entries.findLast(x => x.role === 'assistant')
+  if (lastAnswer && !activeRequest) {
+    $('answer').textContent = lastAnswer.text || (lastAnswer.status === 'generating' ? '正在接话…' : '本轮没有回复文字')
+    if (lastAnswer.firstMs !== null) $('latency').textContent = '生成首字：' + lastAnswer.firstMs + ' ms'
+    $('replyLabel').textContent = lastAnswer.engine === 'mock' ? '模拟回复 · 无 API 调用' : 'DeepSeek · ' + lastAnswer.model
+  }
+}
+let requestSequence = 0
+async function data(response) {
+  const result = await response.json()
+  renderRoom(result.room, response.taskSequence)
+  return result
+}
+function chooseSpeaker(role) {
+  const host = role === 'host'
+  $('hostComposer').hidden = !host; $('viewerComposer').hidden = host
+  $('hostTab').setAttribute('aria-selected',String(host)); $('viewerTab').setAttribute('aria-selected',String(!host))
+}
+$('hostTab').addEventListener('click',() => chooseSpeaker('host'))
+$('viewerTab').addEventListener('click',() => chooseSpeaker('viewer'))
+$('showProcess').addEventListener('change',() => {
+  const pinned = pinnedToBottom()
+  $('chatScroll').classList.toggle('showProcess',$('showProcess').checked)
+  if (pinned) $('chatScroll').scrollTop = $('chatScroll').scrollHeight
+})
+$('latest').addEventListener('click',() => { $('chatScroll').scrollTop = $('chatScroll').scrollHeight })
+for (const [id,action] of [['hostText',speakLine],['viewerText',() => enqueue($('viewerText').value)]]) {
+  $(id).addEventListener('keydown',event => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); void safe(action) }
+  })
+}
+
 bind('hostSubmit', speakLine)
 bind('manualReply', () => generate('host'))
 bind('viewerReply', () => generate('viewer'))
@@ -165,7 +298,7 @@ bind('semantic',() => event({type:'intent',revision:state?.director.revision,int
 bind('refresh',refresh)
 bind('reset',async () => { await api('reset',{}); activeRequest?.abort(); $('answer').textContent='本场已清空'; utterance=null })
 bind('reloadStage',() => { $('stageState').textContent='等待加载'; $('stage').src='http://127.0.0.1:5173' })
-bind('engine',async () => { if(activeRequest || state?.busy) { $('engine').value=$('replyLabel').textContent.startsWith('模拟') ? 'mock' : 'deepseek'; throw new Error('请先完成或打断当前回答再切换回复来源') } trace('回复来源',$('engine').selectedOptions[0].textContent) },'change')
+bind('engine',async () => { if(activeRequest || state?.busy) { $('engine').value=$('replyLabel').textContent.startsWith('模拟') ? 'mock' : 'deepseek'; throw new Error('请先完成或打断当前回答再切换回复来源') } sessionStorage.setItem('replyEngine',$('engine').value); trace('回复来源',$('engine').selectedOptions[0].textContent) },'change')
 const scenarios={handover:'助播，你怎么看虚拟角色陪伴这件事？',pause:'说到这个问题，我先想一想，',backchannel:'嗯，对',stop:'等一下',opportunity:'今天这个故事真有意思，我刚刚突然想到了一个新角度。'}
 bind('scenario',async () => { $('hostText').value=scenarios[$('scenario').value] },'change')
 $('stage').addEventListener('load',() => { $('stageState').textContent='已加载 iframe · 形象待画面确认' })
@@ -193,13 +326,15 @@ async function runQuickTrial(engine) {
   if (engine === 'deepseek' && !state?.deepseekConfigured)
     throw new Error('本机还没有 DeepSeek 密钥。请在本机 .env 填入 DEEPSEEK_API_KEY 并重启文字服务；密钥不要填在 AIRI 页面或聊天中。')
   $('engine').value = engine
-  await api('mute', { value: false })
-  await api('host-speaking', { value: false })
-  await event({ type: 'viewer-window', value: false })
-  await event({ type: 'mode', value: 'auto' })
+  sessionStorage.setItem('replyEngine',engine)
+  if (state.muted) await api('mute', { value: false })
+  if (state.hostSpeaking) await api('host-speaking', { value: false })
+  if (state.director.viewerWindow) await event({ type: 'viewer-window', value: false })
+  if (state.director.mode !== 'auto') await event({ type: 'mode', value: 'auto' })
+  chooseSpeaker('host')
   $('scenario').value = 'handover'
   $('hostText').value = scenarios.handover
-  feedback(engine === 'deepseek' ? '正在向 DeepSeek 提交试聊，回复会显示在字幕里，不会出声。' : '正在用模拟回复试跑，稍后会看到文字字幕，不会出声。')
+  feedback(engine === 'deepseek' ? '正在向 DeepSeek 提交试聊，回复会显示在聊天气泡和字幕里，不会出声。' : '正在用模拟回复试跑，稍后会看到文字字幕，不会出声。')
   await speakLine()
 }
 bind('quickDemo', () => runQuickTrial('mock'))

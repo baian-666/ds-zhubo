@@ -41,6 +41,7 @@ export class Director {
 
   record(action, reason) {
     const entry = { id: ++this.traceNumber, at: this.now(), revision: this.revision, action, reason }
+    this.onRecord?.(entry)
     this.trace.push(entry)
     if (this.trace.length > 100) this.trace.shift()
     return entry
@@ -103,6 +104,7 @@ export class Director {
         if (typeof event.final !== 'boolean') invalid('final 需要布尔值')
         if (!Number.isSafeInteger(event.utterance)) invalid('需要 utterance 编号')
         if (!this.utterance || event.utterance !== this.utterance.id || this.utterance.final) return this.status()
+        if (event.final) this.onTranscript?.({ text, utterance: event.utterance })
         this.invalidate('transcript_updated')
         this.utterance.text = text
         this.utterance.final = event.final
