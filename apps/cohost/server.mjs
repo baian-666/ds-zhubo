@@ -49,8 +49,7 @@ function authorized(request, token) {
   return actual.length === expected.length && timingSafeEqual(actual, expected)
 }
 
-export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = process.env.DEEPSEEK_MODEL || 'deepseek-flash', token = process.env.COHOST_ACCESS_TOKEN || '', scheduler = new Scheduler(), director = new Director({ scheduler }), reply = streamReply, semanticEnabled = false, planner, participationOptions = {} } = {}) {
-  const page = readFileSync(new URL('./index.html', import.meta.url))
+export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = process.env.DEEPSEEK_MODEL || 'deepseek-flash', token = process.env.COHOST_ACCESS_TOKEN || '', scheduler = new Scheduler(), director = new Director({ scheduler }), reply = streamReply, semanticEnabled = false, planner, participationOptions = {}, rehearsal = false } = {}) {
   const histories = { deepseek: [], mock: [] }
   const room = new RoomJournal()
   const scene = new Scene()
@@ -78,6 +77,10 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
     scene.add('assistant', answer, {engine})
     histories[engine] = [...histories[engine], { role: 'user', content: JSON.stringify(input) }, { role: 'assistant', content: answer }].slice(-12)
   }
+  if (rehearsal) {
+    director.event({type:'mode',value:'auto'})
+    director.event({type:'viewer-window',value:true})
+  }
   const server = createServer(async (request, response) => {
     try {
       const path = request.url?.split('?')[0]
@@ -89,7 +92,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
           'Referrer-Policy': 'no-referrer',
           'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; frame-src http://127.0.0.1:5173; frame-ancestors 'none'; base-uri 'none'",
         })
-        response.end(page)
+        response.end(readFileSync(new URL('./index.html', import.meta.url)))
         return
       }
       if (request.method === 'GET' && ['/client.mjs','/stage-bridge.mjs'].includes(path)) {
@@ -296,7 +299,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be 1–65535.')
   if (!['127.0.0.1', '::1', 'localhost'].includes(host) && (process.env.COHOST_ACCESS_TOKEN?.length ?? 0) < 24)
     throw new Error('Set COHOST_ACCESS_TOKEN (24+ characters) before binding beyond loopback.')
-  const server = createApp({semanticEnabled:Boolean(process.env.DEEPSEEK_API_KEY)})
+  const server = createApp({semanticEnabled:Boolean(process.env.DEEPSEEK_API_KEY),rehearsal:true})
   server.listen(port, host, () => console.log(`文字联调台 http://${host}:${port} — 本机网页版虚拟直播间 · 语音与真实弹幕尚未接入`))
   const stop = () => { server.close(); server.closeAllConnections() }
   process.on('SIGTERM', stop)

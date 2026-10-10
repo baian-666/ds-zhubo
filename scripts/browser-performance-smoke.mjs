@@ -17,6 +17,7 @@ try{
  await page.goto(base)
  await page.locator('#performanceState').filter({hasText:'角色已连接'}).waitFor({timeout:90000})
  if(real){
+  await page.locator('#advancedControls > summary').click()
   await page.locator('#hostText').fill('小鲸鱼，蓝色大肥鱼这个名字挺适合你的，你怎么看？')
   await page.locator('#manualReply').click()
   await page.locator('.message.assistant .messageState').filter({hasText:'回答完成'}).waitFor()

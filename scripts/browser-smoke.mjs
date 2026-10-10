@@ -20,6 +20,7 @@ page.on('request', request=>{if(request.url().endsWith('/api/reply')) requests++
 const waitResult=async pattern=>page.waitForFunction(pattern=>new RegExp(pattern).test(document.getElementById('result').textContent), pattern)
 try {
   await page.goto(base)
+  await page.locator('#advancedControls > summary').click()
   await page.locator('#status').filter({hasText:'队列'}).waitFor()
   await page.locator('#engine').selectOption('mock')
   await page.locator('#hostSubmit').click()
@@ -53,6 +54,7 @@ try {
   assert.equal((await page.request.get(base+'/api/status').then(r=>r.json())).busy,false)
   assert.ok((await page.locator('.message.assistant .messageState').allTextContents()).some(x=>x.includes('已打断')))
   await page.locator('#viewerTab').click()
+  await page.locator('summary').filter({hasText:'弹幕设置与候选'}).click()
   await page.locator('#presetSend').click()
   await page.locator('.message.viewer').waitFor()
   await page.locator('#viewerWindow').check()
@@ -95,6 +97,7 @@ try {
   await page.screenshot({path:'data/room-mobile.png',fullPage:true})
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
   assert.deepEqual(errors,[])
+  await page.locator('#advancedControls > summary').click()
   await page.locator('summary').filter({hasText:'本场配置与清空'}).click()
   await page.locator('#reset').click()
   await page.waitForFunction(()=>document.querySelectorAll('.message').length===1)

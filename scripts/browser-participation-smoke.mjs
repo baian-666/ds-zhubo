@@ -22,6 +22,7 @@ await page.addInitScript(()=>{if(location.origin==='http://127.0.0.1:5173'){loca
 try{
  await page.goto('http://127.0.0.1:'+server.address().port)
  await page.waitForFunction(()=>document.getElementById('initiative').checked)
+ await page.locator('#advancedControls > summary').click()
  await page.locator('#mode').selectOption('auto')
  await page.locator('#scenario').selectOption('setup');await page.locator('#hostSubmit').click()
  await page.waitForFunction(()=>Array.from(document.querySelectorAll('.message.director .messageState')).some(x=>x.textContent.includes('自主判断')))

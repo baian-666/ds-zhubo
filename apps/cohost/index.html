@@ -11,6 +11,7 @@ label{display:block;margin:9px 0}input,textarea,select{background:#0e1823;border
 .chatHint{margin:0 0 10px;font-size:12px;color:#9fb3c3}.chatScroll{flex:1;min-height:0;overflow:auto;padding:4px 3px 14px;overscroll-behavior:contain}.chatEmpty{padding:50px 15px;text-align:center;color:#9fb3c3}.messages{list-style:none;margin:0;padding:0}.message{display:flex;gap:8px;margin:14px 0;align-items:flex-start}.avatar{width:30px;height:30px;flex:0 0 30px;display:grid;place-items:center;border-radius:50%;background:#294d47;color:#aff1db;font-size:13px;font-weight:600}.message.host{flex-direction:row-reverse}.message.host .avatar{background:#38486b;color:#d5ddff}.message.viewer .avatar{background:#513f31;color:#ffd4a2}.messageBody{max-width:calc(100% - 38px);min-width:0}.message.host .messageBody{display:flex;flex-direction:column;align-items:flex-end}.messageMeta{display:flex;gap:7px;align-items:center;flex-wrap:wrap;font-size:11px;color:#9fb3c3;margin-bottom:4px}.messageMeta strong{color:#edf3f5;font-size:12px}.messageMeta time{font-variant-numeric:tabular-nums}.badge{padding:0 5px;border-radius:4px;background:#294236;color:#aee5c8}.message.director .badge{background:#423e2f;color:#e3dba5}.bubble{padding:10px 12px;border-radius:2px 12px 12px 12px;background:#233748;color:#e8f1f7;white-space:pre-wrap;overflow-wrap:anywhere;min-width:70px}.message.host .bubble{background:#304667;border-radius:12px 2px 12px 12px}.message.viewer .bubble{background:#2d3039}.message.director .bubble{background:#23362f;color:#c9e7d6;border:1px solid #345749;font-size:13px}.message.director.process .bubble{background:#1c2b27;border-color:#2a4036;color:#a1c1b1}.chatScroll:not(.showProcess) .message.process{display:none}.messageState{font-size:11px;color:#99afbf;margin-top:4px}.replyContext{font-size:11px;color:#a5bac8;border-left:2px solid #4e6d73;padding-left:6px;margin-bottom:6px;white-space:pre-wrap;overflow-wrap:anywhere}.chatToolbar{display:flex;justify-content:space-between;align-items:center;border-top:1px solid #2d3d4f;margin-top:8px;padding-top:6px;font-size:12px}.chatToolbar label{margin:0}.chatToolbar button{font-size:12px}.timeline ol{list-style:none;padding:0;max-height:120px;overflow:auto;margin:6px 0;font-size:11px}.timeline li{display:flex;gap:8px;margin:4px 0}.timeline time{color:#8197a8}.timeline span{overflow-wrap:anywhere}
 @media(max-width:1150px){main{grid-template-columns:minmax(300px,1fr) minmax(340px,1.1fr)}.inputPanel{grid-column:1/-1;height:auto;min-height:0}.scrollControls{overflow:visible}.panel{height:780px}.inputPanel .controls{max-width:600px}.composer textarea{min-height:80px}}
 @media(max-width:700px){body{padding:10px}header{align-items:flex-start;flex-direction:column;gap:5px}main{display:flex;flex-direction:column}.panel{height:auto;min-height:0}.stage{flex:none;height:450px;min-height:0}.chatPanel{height:600px}.inputPanel{order:2}.chatPanel{order:3}.stagePanel{order:1}h1{font-size:20px}.status{font-size:11px}.stageTitle{flex-wrap:wrap}}
+.rehearsalHint{margin:0 0 5px;font-size:13px;color:#c5d5df}#rehearsalState{display:block;color:#82ddc6;margin-bottom:14px}.primarySend{width:100%;margin:8px 0}.rehearsalActions{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid #2d3d4f;margin-top:18px;padding-top:14px}.rehearsalActions small{font-size:11px}.advancedControls{border-top:1px solid #2d3d4f;padding-top:14px;margin-top:24px}.advancedControls>summary{margin-bottom:14px}.composer textarea{min-height:140px}.visuallyHidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 </style></head>
 <body>
 <header><div><div class="tag">LOCAL REHEARSAL · 文字排练</div><h1>小鲸鱼 · 虚拟直播间</h1></div><div id="status" class="status" role="status">连接本机服务…</div></header>
@@ -29,36 +30,41 @@ label{display:block;margin:9px 0}input,textarea,select{background:#0e1823;border
 <div class="panelTitle"><h2>直播间聊天</h2><small>按时间排列</small></div>
 <p class="chatHint">同一位助播，用气泡回复，也说明自己的导演决定。</p>
 <div id="chatScroll" class="chatScroll" role="log" aria-label="主播、弹幕、助播与导演的聊天时间线" aria-live="polite" aria-relevant="additions">
-<div id="chatEmpty" class="chatEmpty">从右侧发送一句主播话或弹幕。<br>也可以点“一键真实试聊”，看完整接话过程。</div><ol id="messages" class="messages"></ol>
+<div id="chatEmpty" class="chatEmpty">从右侧发送一句主播话或弹幕。<br>小鲸鱼会自己判断接话、回应或等待。</div><ol id="messages" class="messages"></ol>
 </div>
 <div class="chatToolbar"><label><input id="showProcess" type="checkbox"> 显示过程事件</label><button id="latest" class="secondary">回到最新 ↓</button></div>
 <details class="timeline"><summary>请求与耗时记录</summary><ol id="timeline"></ol></details>
 </section>
-<section class="panel inputPanel"><div class="panelTitle"><h2>模拟发言台</h2><small>主播 / 弹幕</small></div><div class="scrollControls">
-<div class="controls"><label>导演<select id="mode"><option value="manual">人工导演</option><option value="auto">自动导演</option></select></label>
-<label>回复来源<select id="engine"><option value="deepseek">DeepSeek · 真实 API</option><option value="mock">模拟回复 · 不调用 API</option></select></label></div>
-<div class="switches"><button id="interrupt" class="stop">打断助播</button><label><input id="muted" type="checkbox"> 静音</label></div>
-<label><input id="initiative" type="checkbox"> 自主参与 · DeepSeek</label><small id="initiativeState">读取参与状态…</small>
-<div class="quickStart"><p>先看一次完整的主播 → 导演 → 助播回复。</p><button id="quickReal">一键真实试聊</button><button id="quickDemo" class="secondary">先看模拟效果</button><strong id="testFeedback" role="status">回复和导演决定会出现在中间的聊天气泡里。</strong></div>
-<div class="speakerTabs" role="tablist" aria-label="选择模拟发言者"><button id="hostTab" role="tab" aria-selected="true" aria-controls="hostComposer">主播</button><button id="viewerTab" role="tab" aria-selected="false" aria-controls="viewerComposer">弹幕</button></div>
+<section class="panel inputPanel"><div class="panelTitle"><h2>直播模拟台</h2><small>文字排练</small></div><div class="scrollControls">
+<p class="rehearsalHint">扮演主播或观众发一句，看看小鲸鱼怎么接。</p><small id="rehearsalState" role="status">正在连接…</small>
+<div class="speakerTabs" role="tablist" aria-label="选择模拟发言者"><button id="hostTab" role="tab" aria-selected="true" aria-controls="hostComposer">主播说话</button><button id="viewerTab" role="tab" aria-selected="false" aria-controls="viewerComposer">观众弹幕</button></div>
 <div id="hostComposer" class="composer" role="tabpanel" aria-labelledby="hostTab">
-<label>测试场景<select id="scenario"><option value="handover">明确交棒</option><option value="pause">句中停顿</option><option value="backchannel">短附和</option><option value="stop">明确打断</option><option value="opportunity">未点名话题</option><option value="setup">上下文铺垫 · 年糕</option><option value="natural">自然接梗 · 晾衣机</option><option value="recall">询问之前的猫名</option></select></label>
-<label for="hostText">模拟主播说话</label><textarea id="hostText" maxlength="2000">助播，你怎么看虚拟角色陪伴这件事？</textarea>
-<div class="sendRow"><button id="hostSubmit">发送主播发言</button><button id="manualReply" class="secondary">人工让助播接话</button></div>
-<small>Ctrl / ⌘ + Enter 发送。人工模式提交后，再点“人工让助播接话”。</small>
-<label><input id="speaking" type="checkbox"> 主播持续讲话（观察活动）</label><button id="topicChange" class="secondary">切换话题</button>
+<label>找句话试试<select id="scenario"><option value="handover">问问小鲸鱼的想法</option><option value="setup">讲故事：我的猫叫年糕</option><option value="natural">接着聊：跑步机变晾衣机</option><option value="pause">话说一半，想一想</option><option value="backchannel">附和一句：嗯，对</option><option value="stop">打断一句：等一下</option><option value="opportunity">聊到一个有意思的话题</option><option value="recall">问问刚才的猫叫什么</option></select></label>
+<label for="hostText" class="visuallyHidden">主播说的话</label><textarea id="hostText" maxlength="2000" placeholder="输入主播正在说的话…">小鲸鱼，你怎么看虚拟角色陪伴这件事？</textarea>
+<button id="hostSubmit" class="primarySend">说完这句，发送</button>
+<label><input id="speaking" type="checkbox"> 我还在说，先别接话</label><small>勾选模拟持续讲话；发送这句或取消勾选表示说完。</small>
 </div>
 <div id="viewerComposer" class="composer" role="tabpanel" aria-labelledby="viewerTab" hidden>
-<label>预设弹幕<select id="preset"><option>助播，你觉得虚拟角色最吸引人的是什么？</option><option>主播先讲，我想听刚才那个例子</option><option>助播能用一个例子解释一下吗？</option><option>哈哈这个说法好有意思</option><option>助播，你能总结一下吗？</option></select></label><button id="presetSend" class="secondary">发送选中弹幕</button>
-<label for="viewerText">自定义弹幕</label><textarea id="viewerText" maxlength="500" placeholder="观众说了什么？"></textarea>
-<div class="controls"><label>来源<select id="platform"><option value="bilibili">B 站（模拟）</option><option value="wechat">视频号（模拟）</option><option value="manual">手动</option></select></label><label>观众<input id="userId" value="viewer-1" maxlength="128" style="width:100%"></label></div>
-<label><input id="mentioned" type="checkbox" checked> 向助播提问</label><button id="enqueue">发送自定义弹幕</button>
-<label><input id="simulate" type="checkbox"> 每 5 秒发送一条预设弹幕</label>
+<label>找条弹幕试试<select id="preset"><option>小鲸鱼，你觉得虚拟角色最吸引人的是什么？</option><option>主播先讲，我想听刚才那个例子</option><option>小鲸鱼能用一个例子解释一下吗？</option><option>哈哈这个说法好有意思</option><option>小鲸鱼，你能总结一下吗？</option></select></label>
+<label for="viewerText" class="visuallyHidden">观众发的弹幕</label><textarea id="viewerText" maxlength="500" placeholder="输入观众发的弹幕…">小鲸鱼，你觉得虚拟角色最吸引人的是什么？</textarea>
+<button id="enqueue" class="primarySend">发送弹幕</button>
+<label><input id="simulate" type="checkbox"> 自动来点弹幕 · 每 5 秒一条</label>
+<label><input id="viewerWindow" type="checkbox"> 允许小鲸鱼回复弹幕</label>
 </div>
-<h3>弹幕接话</h3><label><input id="viewerWindow" type="checkbox"> 自动导演允许回复弹幕</label><button id="viewerReply" class="secondary">人工挑一条回复</button>
-<details><summary>候选弹幕与优先选择</summary><small>20 秒全局冷却、60 秒同观众冷却；20 秒过期。聊天记录会保留发言。</small><div id="feed" class="feed"></div></details>
-<details><summary>模拟语义与分步事件</summary><label>模拟意图<select id="intent"><option value="hold">继续听</option><option value="handover">交棒</option><option value="backchannel">短附和</option><option value="takeover">主播接管</option><option value="opportunity">主动补充机会</option></select></label>
+<div class="rehearsalActions"><button id="interrupt" class="stop">让小鲸鱼停一下</button><small>Ctrl / ⌘ + Enter 发送</small></div>
+<strong id="testFeedback" role="status">发言和小鲸鱼的回应会出现在中间聊天里。</strong>
+<details id="advancedControls" class="advancedControls"><summary>更多设置</summary>
+<div class="controls"><label>导演<select id="mode"><option value="auto">自动导演</option><option value="manual">人工导演</option></select></label><label>回复来源<select id="engine"><option value="deepseek">DeepSeek · 真实 API</option><option value="mock">模拟回复 · 不调用 API</option></select></label></div>
+<label><input id="initiative" type="checkbox"> 自主参与 · DeepSeek</label><small id="initiativeState">读取参与状态…</small>
+<label><input id="muted" type="checkbox"> 暂时暂停小鲸鱼的回应</label>
+<div><button id="manualReply" class="secondary">人工让助播接话</button><button id="viewerReply" class="secondary">人工挑一条弹幕回复</button></div>
+<button id="topicChange" class="secondary">切换话题</button>
+<details><summary>弹幕设置与候选</summary><div class="controls"><label>来源<select id="platform"><option value="bilibili">B 站（模拟）</option><option value="wechat">视频号（模拟）</option><option value="manual">手动</option></select></label><label>固定观众昵称<input id="userId" value="" placeholder="留空则轮换观众" maxlength="128" style="width:100%"></label></div>
+<label><input id="mentioned" type="checkbox" checked> 自定义弹幕是在问小鲸鱼</label><button id="presetSend" class="secondary">发送选中预设</button><small>只挑合适的弹幕回复；短时间不会连续回同一观众。</small><div id="feed" class="feed"></div></details>
+<details><summary>开发调试</summary><button id="quickReal">一键真实试聊</button><button id="quickDemo" class="secondary">先看模拟效果</button>
+<label>模拟意图<select id="intent"><option value="hold">继续听</option><option value="handover">交棒</option><option value="backchannel">短附和</option><option value="takeover">主播接管</option><option value="opportunity">主动补充机会</option></select></label>
 <button id="semantic" class="secondary">提交模拟语义</button><button id="speechStart" class="secondary">开始讲话</button><button id="finalText" class="secondary">最终文本</button><button id="speechEnd" class="secondary">结束讲话</button><small>语义由操作者指定。</small></details>
 <details><summary>本场配置与清空</summary><label>助播访问令牌<input id="token" type="password" autocomplete="off" placeholder="不是 DeepSeek 密钥"></label><button id="refresh" class="secondary">刷新连接</button><button id="reset" class="secondary">清空本场聊天与上下文</button><small>密钥只填本机 .env。</small></details>
+</details>
 </div></section>
 </main><script type="module" src="/client.mjs"></script></body></html>

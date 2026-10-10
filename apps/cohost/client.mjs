@@ -10,7 +10,7 @@ for(const button of document.querySelectorAll('[data-pose]'))button.onclick=()=>
 
 const stageUrl='http://127.0.0.1:5173/?cohostOrigin='+encodeURIComponent(location.origin)
 $('stage').src=stageUrl
-const savedEngine = sessionStorage.getItem('replyEngine')
+const savedEngine = sessionStorage.getItem('rehearsalEngine')
 if (['deepseek','mock'].includes(savedEngine)) $('engine').value = savedEngine
 let state, utterance, activeRequest = null, activeTurn = null, refreshing = false, submitting = false
 let seenTrace = 0, attemptedDecision = 0, simulatedNumber = 0, blockedDecision = 0
@@ -69,7 +69,7 @@ async function refresh() {
   refreshing = true
   try {
     state = await data(await api('status'))
-    if ($('engine').value === 'mock' && state.participation?.enabled) { await api('participation',{enabled:false}); state = await data(await api('status')) }
+    $('rehearsalState').textContent=state.muted ? '小鲸鱼已暂停回应' : $('engine').value==='mock' ? '模拟回复 · 不调用模型' : !state.deepseekConfigured ? 'DeepSeek 未配置 · 请先配置本机密钥' : state.director.mode==='auto' ? '真实 DeepSeek · 小鲸鱼自动决定何时参与' : '人工接话 · 在更多设置里让小鲸鱼回答'
     $('initiative').checked = Boolean(state.participation?.enabled)
     $('initiative').disabled = !state.participation?.configured || $('engine').value === 'mock'
     $('initiativeState').textContent = state.participation?.busy ? '正在判断参与时机…' : state.participation?.enabled ? '自然接话；明确交棒直接回复。决定会显示在聊天里。' : '当前仅使用明确交棒规则。'
@@ -166,8 +166,8 @@ async function speakLine() {
 }
 async function enqueue(text, simulated=false) {
   const result = await data(await api('danmaku',{id:crypto.randomUUID(),platform:$('platform').value,
-    userId: simulated ? `sim-${++simulatedNumber}` : $('userId').value,text,
-    mentioned:simulated ? text.startsWith('助播') : $('mentioned').checked,selected:false}))
+    userId: simulated ? `sim-${++simulatedNumber}` : $('userId').value.trim() || `viewer-${++simulatedNumber}`,text,
+    mentioned:simulated ? /^(助播|小鲸鱼)/u.test(text) : $('mentioned').checked,selected:false}))
   trace('弹幕', result.accepted ? text : '重复消息已忽略')
 }
 async function safe(action) { try { await action(); await refresh() } catch(error) { feedback(error.message); trace('提示',error.message) } }
@@ -312,6 +312,7 @@ bind('speaking',async () => { if($('speaking').checked) await startSpeech(); els
 bind('viewerWindow', () => event({type:'viewer-window',value:$('viewerWindow').checked}),'change')
 bind('topicChange',() => event({type:'topic-change'}))
 bind('enqueue',() => enqueue($('viewerText').value))
+bind('preset',async () => { $('viewerText').value=$('preset').value },'change')
 bind('presetSend',() => enqueue($('preset').value,true))
 bind('speechStart',startSpeech); bind('finalText',finishText); bind('speechEnd',() => event({type:'speech-end',utterance}))
 bind('semantic',() => event({type:'intent',revision:state?.director.revision,intent:$('intent').value,confidence:1}))
@@ -319,7 +320,7 @@ bind('initiative',() => api('participation',{enabled:$('initiative').checked}),'
 bind('refresh',refresh)
 bind('reset',async () => { await api('reset',{}); activeRequest?.abort(); $('answer').textContent='本场已清空'; utterance=null })
 bind('reloadStage',() => { $('stageState').textContent='等待加载'; $('stage').src=stageUrl })
-bind('engine',async () => { if(activeRequest || state?.busy) { $('engine').value=$('replyLabel').textContent.startsWith('模拟') ? 'mock' : 'deepseek'; throw new Error('请先完成或打断当前回答再切换回复来源') } sessionStorage.setItem('replyEngine',$('engine').value); await api('participation',{enabled:$('engine').value==='deepseek' && Boolean(state?.participation?.configured)}); trace('回复来源',$('engine').selectedOptions[0].textContent) },'change')
+bind('engine',async () => { if(activeRequest || state?.busy) { $('engine').value=$('replyLabel').textContent.startsWith('模拟') ? 'mock' : 'deepseek'; throw new Error('请先完成或打断当前回答再切换回复来源') } sessionStorage.setItem('rehearsalEngine',$('engine').value); await api('participation',{enabled:$('engine').value==='deepseek' && Boolean(state?.participation?.configured)}); trace('回复来源',$('engine').selectedOptions[0].textContent) },'change')
 const scenarios={natural:'你说我这跑步机是不是该改名叫晾衣机？',setup:'我的猫叫年糕，它每天霸占跑步机。先听我把故事讲完。',recall:'助播，你觉得刚才那只猫叫什么名字？',handover:'助播，你怎么看虚拟角色陪伴这件事？',pause:'说到这个问题，我先想一想，',backchannel:'嗯，对',stop:'等一下',opportunity:'今天这个故事真有意思，我刚刚突然想到了一个新角度。'}
 bind('scenario',async () => { $('hostText').value=scenarios[$('scenario').value] },'change')
 $('stage').addEventListener('load',() => { $('stageState').textContent='已加载 iframe · 形象待画面确认' })
@@ -347,7 +348,7 @@ async function runQuickTrial(engine) {
   if (engine === 'deepseek' && !state?.deepseekConfigured)
     throw new Error('本机还没有 DeepSeek 密钥。请在本机 .env 填入 DEEPSEEK_API_KEY 并重启文字服务；密钥不要填在 AIRI 页面或聊天中。')
   $('engine').value = engine
-  sessionStorage.setItem('replyEngine',engine)
+  sessionStorage.setItem('rehearsalEngine',engine)
   await api('participation',{enabled:engine==='deepseek' && Boolean(state?.participation?.configured)})
   if (state.muted) await api('mute', { value: false })
   if (state.hostSpeaking) await api('host-speaking', { value: false })
