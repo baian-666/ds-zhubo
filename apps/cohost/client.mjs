@@ -1,9 +1,21 @@
+import { connectStage } from './stage-bridge.mjs'
 const $ = id => document.getElementById(id)
+const poseNames={idle:'待机',listen:'倾听',think:'思考',nod:'点头',smile:'轻笑',surprise:'惊讶',pout:'嘴硬'}
+let stageSeen=0
+const stageBridge=connectStage($('stage'), status=>{
+  stageSeen=Date.now()
+  $('performanceState').textContent=status.ready ? '角色已连接 · '+poseNames[status.name]+' · 本机姿态表演' : '表演桥接已连接 · 等待 Live2D 模型加载'
+})
+for(const button of document.querySelectorAll('[data-pose]'))button.onclick=()=>safe(()=>api('performance',{name:button.dataset.pose}))
+
+const stageUrl='http://127.0.0.1:5173/?cohostOrigin='+encodeURIComponent(location.origin)
+$('stage').src=stageUrl
 const savedEngine = sessionStorage.getItem('replyEngine')
 if (['deepseek','mock'].includes(savedEngine)) $('engine').value = savedEngine
 let state, utterance, activeRequest = null, activeTurn = null, refreshing = false, submitting = false
 let seenTrace = 0, attemptedDecision = 0, simulatedNumber = 0, blockedDecision = 0
 const reasons = {
+  participation_reaction:'我先用文字或表情回应，不抢话',
   participation_changed: '自主参与设置改变，旧决定作废', scene_changed: '现场有新消息，重新判断',
   mode_changed: '导演模式改变，旧机会作废', host_voice_detected: '听到主播活动，先观察，不直接打断',
   transcript_updated: '主播文本更新，旧判断作废', short_acknowledgment: '短附和，保留助播话轮',
@@ -227,10 +239,10 @@ function renderMessage(entry) {
   node.revision = entry.revision
   node.item.className = 'message ' + entry.role + (processReasons.has(entry.reason) ? ' process' : '')
   node.item.dataset.id = entry.id
-  node.avatar.textContent = ['assistant','director'].includes(entry.role) ? '助' : entry.role === 'host' ? '主' : '弹'
-  node.sender.textContent = entry.role === 'viewer' ? (entry.userId || '观众') : entry.role === 'host' ? '主播' : '助播'
+  node.avatar.textContent = ['assistant','director'].includes(entry.role) ? '鲸' : entry.role === 'host' ? '主' : '弹'
+  node.sender.textContent = entry.role === 'viewer' ? (entry.userId || '观众') : entry.role === 'host' ? '主播' : '小鲸鱼'
   node.badge.textContent = entry.role === 'director' ? '导演决定 · ' + (decisionLabels[entry.reason] ?? actions[entry.action] ?? entry.action) :
-    entry.role === 'assistant' ? '助播回复' : entry.role === 'viewer' ? '模拟弹幕' : '模拟发言'
+    entry.role === 'assistant' ? (entry.delivery === 'reaction' ? '文字 / 表情回应 · 不开口' : '助播回复') : entry.role === 'viewer' ? '模拟弹幕' : '模拟发言'
   node.time.textContent = new Date(entry.at).toLocaleTimeString('zh-CN',{hour12:false})
   node.time.dateTime = new Date(entry.at).toISOString()
   node.quote.hidden = entry.role !== 'assistant' || !entry.replyingTo
@@ -239,7 +251,7 @@ function renderMessage(entry) {
     entry.text || (entry.status === 'generating' ? '正在想怎么回答…' : entry.status === 'cancelled' ? '还没说出文字就被打断了。' : '没有收到回复文字。')
   const labels = {generating:'正在回复…',completed:'回答完成',cancelled:'已打断 · 保留可见片段',failed:'调用失败',awaitingPlayback:'等待播放反馈'}
   node.status.textContent = entry.role === 'assistant' ?
-    [entry.engine === 'mock' ? '模拟回复 · 无 API 调用' : entry.model, entry.decisionMs !== undefined ? '判断与拟稿 ' + entry.decisionMs + ' ms' : entry.firstMs === null ? '' : '生成首字 ' + entry.firstMs + ' ms', labels[entry.status], entry.error].filter(Boolean).join(' · ') : entry.decisionMs !== undefined ? '自主判断 ' + entry.decisionMs + ' ms' : ''
+    [entry.performance ? '表演意图：'+poseNames[entry.performance] : '', entry.engine === 'mock' ? '模拟回复 · 无 API 调用' : entry.model, entry.decisionMs !== undefined ? '判断与拟稿 ' + entry.decisionMs + ' ms' : entry.firstMs === null ? '' : '生成首字 ' + entry.firstMs + ' ms', labels[entry.status], entry.error].filter(Boolean).join(' · ') : entry.decisionMs !== undefined ? '自主判断 ' + entry.decisionMs + ' ms' : ''
   node.status.hidden = !node.status.textContent
   $('chatEmpty').hidden = messageNodes.size > 0
   if (pinned) $('chatScroll').scrollTop = $('chatScroll').scrollHeight
@@ -267,6 +279,8 @@ let requestSequence = 0
 async function data(response) {
   const result = await response.json()
   renderRoom(result.room, response.taskSequence)
+  if(result.performance) stageBridge.update(result.performance,response.taskSequence)
+  if(Date.now()-stageSeen>3500)$('performanceState').textContent='等待舞台表演连接，请确认 AIRI 已启动并加载模型'
   return result
 }
 function chooseSpeaker(role) {
@@ -304,7 +318,7 @@ bind('semantic',() => event({type:'intent',revision:state?.director.revision,int
 bind('initiative',() => api('participation',{enabled:$('initiative').checked}),'change')
 bind('refresh',refresh)
 bind('reset',async () => { await api('reset',{}); activeRequest?.abort(); $('answer').textContent='本场已清空'; utterance=null })
-bind('reloadStage',() => { $('stageState').textContent='等待加载'; $('stage').src='http://127.0.0.1:5173' })
+bind('reloadStage',() => { $('stageState').textContent='等待加载'; $('stage').src=stageUrl })
 bind('engine',async () => { if(activeRequest || state?.busy) { $('engine').value=$('replyLabel').textContent.startsWith('模拟') ? 'mock' : 'deepseek'; throw new Error('请先完成或打断当前回答再切换回复来源') } sessionStorage.setItem('replyEngine',$('engine').value); await api('participation',{enabled:$('engine').value==='deepseek' && Boolean(state?.participation?.configured)}); trace('回复来源',$('engine').selectedOptions[0].textContent) },'change')
 const scenarios={natural:'你说我这跑步机是不是该改名叫晾衣机？',setup:'我的猫叫年糕，它每天霸占跑步机。先听我把故事讲完。',recall:'助播，你觉得刚才那只猫叫什么名字？',handover:'助播，你怎么看虚拟角色陪伴这件事？',pause:'说到这个问题，我先想一想，',backchannel:'嗯，对',stop:'等一下',opportunity:'今天这个故事真有意思，我刚刚突然想到了一个新角度。'}
 bind('scenario',async () => { $('hostText').value=scenarios[$('scenario').value] },'change')

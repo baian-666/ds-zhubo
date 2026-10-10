@@ -3,7 +3,7 @@ import { performance } from 'node:perf_hooks'
 const intents = new Set(['hold', 'handover', 'backchannel', 'takeover', 'stop', 'opportunity'])
 const stopPhrase = /^(等一下|先听我说|先别说了|停一下|停止回答)[。！!，,\s]*$/u
 const acknowledgment = /^(?:(?:嗯+|哦+|对|是的|没错|好的|好)[。！!，,、\s]*){1,3}$/u
-const addressedQuestion = /^助播[，,：:\s].*(你怎么看|你觉得|你来说|你来回答|帮我解释|说说你的看法)/u
+const addressedQuestion = /^(?:助播|小鲸鱼)[，,：:\s].*(你怎么看|你觉得|你来说|你来回答|帮我解释|说说你的看法)/u
 
 function invalid(message) { const error = new Error(message); error.status = 400; throw error }
 function string(value, max = 2000) {
@@ -187,8 +187,9 @@ export class Director {
   consume(id) {
     this.scheduler.expirePlayback()
     const candidate = this.candidate
+    if (!candidate || candidate.id !== id) return null
     this.candidate = null
-    if (!candidate || candidate.id !== id || candidate.revision !== this.revision ||
+    if (candidate.revision !== this.revision ||
       this.now() >= candidate.expiresAt || this.mode !== 'auto' || this.scheduler.muted ||
       this.scheduler.hostSpeaking || this.scheduler.active) return null
     if (candidate.source === 'viewer') {
@@ -196,14 +197,14 @@ export class Director {
       if (!this.viewerWindow || !item || item.id !== candidate.messageId || item.platform !== candidate.platform) return null
       this.invalidate('viewer_decision_consumed')
       const turn = this.scheduler.beginViewer(item)
-      if (turn) Object.assign(turn, { preparedReply:candidate.preparedReply, decisionMs:candidate.decisionMs })
+      if (turn) Object.assign(turn, { preparedReply:candidate.preparedReply, performance:candidate.performance, decisionMs:candidate.decisionMs })
       return turn
     }
     this.consumedUtterance = this.utterance.id
     if (candidate.intent === 'opportunity') this.lastParticipation = this.now()
     this.invalidate('decision_consumed')
     const turn = this.scheduler.beginHost(candidate.text)
-    if (turn) { turn.input.participation = candidate.intent; Object.assign(turn, {preparedReply:candidate.preparedReply, decisionMs:candidate.decisionMs}) }
+    if (turn) { turn.input.participation = candidate.intent; Object.assign(turn, {preparedReply:candidate.preparedReply, performance:candidate.performance, decisionMs:candidate.decisionMs}) }
     return turn
   }
 

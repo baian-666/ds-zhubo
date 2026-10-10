@@ -13,7 +13,7 @@ label{display:block;margin:9px 0}input,textarea,select{background:#0e1823;border
 @media(max-width:700px){body{padding:10px}header{align-items:flex-start;flex-direction:column;gap:5px}main{display:flex;flex-direction:column}.panel{height:auto;min-height:0}.stage{flex:none;height:450px;min-height:0}.chatPanel{height:600px}.inputPanel{order:2}.chatPanel{order:3}.stagePanel{order:1}h1{font-size:20px}.status{font-size:11px}.stageTitle{flex-wrap:wrap}}
 </style></head>
 <body>
-<header><div><div class="tag">LOCAL REHEARSAL · 文字排练</div><h1>助播 · 虚拟直播间</h1></div><div id="status" class="status" role="status">连接本机服务…</div></header>
+<header><div><div class="tag">LOCAL REHEARSAL · 文字排练</div><h1>小鲸鱼 · 虚拟直播间</h1></div><div id="status" class="status" role="status">连接本机服务…</div></header>
 <main>
 <section id="stagePanel" class="panel stagePanel">
 <div class="panelTitle stageTitle"><h2>AIRI 网页舞台 <small id="stageState">等待启动</small></h2><button id="expandStage" class="secondary" aria-expanded="false" aria-controls="stagePanel">放大舞台</button></div>
@@ -21,7 +21,9 @@ label{display:block;margin:9px 0}input,textarea,select{background:#0e1823;border
 <div class="caption" id="answer" aria-live="polite">助播的最新回复也会显示在这里。</div>
 <div class="metrics"><span id="latency">首字：—</span><span id="replyLabel">DeepSeek · 真实回复</span></div><div id="result" role="status"></div>
 <div class="stageFooter"><button id="reloadStage" class="secondary">重新连接</button><a href="http://127.0.0.1:5173" target="_blank" rel="noreferrer">单独打开 AIRI</a></div>
-<small>文字与形象已接；语音、口型与真实平台弹幕待接入。</small>
+<div id="performanceControls" class="stageFooter" aria-label="角色试演"><button data-pose="nod">点头</button><button data-pose="smile">轻笑</button><button data-pose="surprise">惊讶</button><button data-pose="pout">嘴硬</button><button data-pose="think">思考</button><button data-pose="idle">恢复</button></div>
+<small id="performanceState" role="status">等待表演桥接…</small><br>
+<small>小鲸鱼人格 · 当前 AIRI 形象。文字与姿态联动；语音、口型与真实平台弹幕待接入。</small>
 </section>
 <section class="panel chatPanel">
 <div class="panelTitle"><h2>直播间聊天</h2><small>按时间排列</small></div>

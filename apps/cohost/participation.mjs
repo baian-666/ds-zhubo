@@ -1,7 +1,8 @@
+import { performances } from './performance.mjs'
 // One async planner beside the deterministic director. No serial second generation.
 export class Participation {
-  constructor({ director, scheduler, scene, plan, enabled = false, now = Date.now, debounceMs = 250, timeoutMs = 4500, opportunityMs = 6000 } = {}) {
-    Object.assign(this,{director,scheduler,scene,plan,now,debounceMs,timeoutMs,opportunityMs})
+  constructor({ director, scheduler, scene, plan, onReaction = () => {}, enabled = false, now = Date.now, debounceMs = 250, timeoutMs = 4500, opportunityMs = 6000 } = {}) {
+    Object.assign(this,{director,scheduler,scene,plan,onReaction,now,debounceMs,timeoutMs,opportunityMs})
     this.enabled = enabled; this.pending = false; this.job = null; this.timer = null
     this.observedUtterance = null; this.lastKey = null; this.closed = false; this.lastDecision = null
     director.semanticViewer = enabled
@@ -79,13 +80,20 @@ export class Participation {
   }
   apply(result,snapshot,decisionMs) {
     const d=this.director,s=this.scheduler,u=d.utterance
-    if (!result || !['wait','reply_host','reply_viewer','stop'].includes(result.action) ||
+    if (!result || !['wait','reply_host','reply_viewer','react','stop'].includes(result.action) ||
       typeof result.reason!=='string' || !result.reason.trim() || result.reason.length>180 ||
       typeof result.text!=='string' || result.text.length>800) throw new Error('Invalid action')
+    if(result.performance !== undefined && !performances.includes(result.performance))throw new Error('Invalid performance')
     if (snapshot.hostOpportunity && u?.id === snapshot.latestHost?.id) this.observedUtterance=u.id
     const details={explanation:result.reason,decisionMs}
     this.lastDecision={action:result.action,reason:result.reason,decisionMs,at:this.now()}
     if(result.action==='wait') {d.record('hold','participation_wait',details);return}
+    if(result.action==='react') {
+      if(!snapshot.hostOpportunity || !u || this.now()-u.endedAt>=this.opportunityMs || s.active || result.text.length>40 || this.now()-d.lastParticipation<d.participationCooldownMs)return
+      d.lastParticipation=this.now();d.consumedUtterance=u.id
+      this.onReaction(result)
+      d.record('hold','participation_reaction',details);return
+    }
     if(result.action==='stop') {
       if(!snapshot.hostOpportunity || !s.active || !u || this.now()-u.endedAt>=this.opportunityMs)return
       s.interrupt();d.consumedUtterance=u.id;d.intent='stop';d.candidate=null
@@ -100,14 +108,14 @@ export class Participation {
         d.record('hold','participation_cooldown',{explanation:'我刚补充过一次，这次先让主播继续。'});return
       }
       d.candidate={id:++d.nextDecision,revision:d.revision,text:u.text,intent:result.hostIntent === 'invited' ? 'handover' : 'opportunity',
-        expiresAt:this.now()+1500,preparedReply:result.text,decisionMs}
+        expiresAt:this.now()+1500,preparedReply:result.text,performance:result.performance,decisionMs}
     } else {
       if(!d.viewerWindow)return
       const item=s.eligibleViewers().find(x=>x.id===result.targetId && x.platform===result.platform)
       if(!item || !snapshot.eligibleViewers.some(x=>x.id===item.id && x.platform===item.platform))return
       d.candidate={id:++d.nextDecision,revision:d.revision,source:'viewer',messageId:item.id,platform:item.platform,
         text:item.text,intent:'viewer',expiresAt:Math.min(this.now()+1500,item.receivedAt+s.ttlMs),
-        preparedReply:result.text,decisionMs,semanticSelection:true}
+        preparedReply:result.text,performance:result.performance,decisionMs,semanticSelection:true}
     }
     d.record('reply','participation_reply',details)
   }

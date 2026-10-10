@@ -47,5 +47,6 @@ if (action === 'setup' || action === 'setup-web') {
   // Vite accepts only the current private Codespaces host, rather than every host.
   if (process.env.CODESPACE_NAME && process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN)
     process.env.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS = `${process.env.CODESPACE_NAME}-5173.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`
+  run(process.execPath, [join(root,'scripts/patch-airi.mjs')], root)
   run('pnpm', ['-F', '@proj-airi/stage-web', 'exec', 'vite', '--host', '127.0.0.1', '--port', '5173', '--strictPort'])
 }

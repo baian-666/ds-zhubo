@@ -67,3 +67,9 @@ pnpm -F @proj-airi/stage-web exec vite --host 127.0.0.1 --port 5173 --strictPort
 
 接着实施文字虚拟直播间：可选/自定义模拟弹幕、文字模拟主播讲话、AIRI 形象与字幕、人工/自动导演和决策时间线。真人主播主导，优先验证何时该说话；不要在主 AI 快速回答前串行增加另一轮模型调用。已有异步导演与播放回执原型；复杂语义适配、完整虚拟直播间、真实语音和长期记忆尚未完成。用户已允许按需少量真实 API 测试，不购买资源、不正式直播。直接继续开发，完成检查并更新 STATUS。
 ```
+
+## 表演版本的 AIRI 本机补丁
+
+运行 dev:airi 时会自动执行 scripts/patch-airi.mjs，将 integrations/airi 的受跟踪源码应用到固定版本，再生成控制台的 Eventa 浏览器桥接。补丁不需要把 DeepSeek 密钥填进 AIRI。
+
+已经应用补丁的 vendor/airi 会显示本机修改；setup:airi:web 的保护检查会拒绝重置它。正常体验直接运行 dev:airi。修改后的表演源码应保存在 integrations/airi，不能只留在 vendor。详细范围和验收见 docs/LIVE2D-PERFORMANCE.md。

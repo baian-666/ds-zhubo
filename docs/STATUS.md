@@ -2,6 +2,17 @@
 
 更新：2026-10-10。
 
+## 2026-10-10 小鲸鱼人格与 Live2D 表演第一版
+
+- 按用户授权完成开发：共同人格采用 qq-bridge 小鲸鱼的直播改编版，保留来源与 MIT 许可；director/assistant 共用角色与头像。
+- 同次自主工具调用增加 performance 与 react，支持只发短文字/emoji 或姿态、不占语音话轮。直接交棒允许从回答流提取短动作标记，字幕和历史不包含控制标记，无额外表演模型调用。
+- 连接 cohost 与 AIRI stage-web，加入倾听/思考/点头/轻笑/惊讶/嘴硬、手动试演、限时恢复、话轮取消与断联释放。使用现有 normalized pose 和弹簧，不修改永久模型设置；默认模型已验证，其他模型和真实口型未验收。
+- 可重放上游源码放在 integrations/airi，scripts/patch-airi.mjs 验证 pinned HEAD 并保护已有编辑，dev:airi 自动应用。唯一副本不在忽略的 vendor。浏览器包依赖许可保存在 third-party/stage-bridge。
+- 修复过期消费请求清除新候选；其他已登记问题仍待解决。详见 docs/PARTICIPATION-REVIEW.md。
+- 原型 check 与 68 项测试通过；stage-web typecheck 通过，改动文件 lint 通过，Live2D motion-control 6 项测试通过。全量 AIRI lint 被文档站缺少 @radix-ui/colors 阻断，未把它标为通过。
+- 浏览器确认默认 Live2D 轻笑/嘴硬实际可见，点头、过期、打断及心跳断开释放通过、无页面错误。真实模型：1 次流式 + 2 次自主调用分别出现嘴硬、🙃 非语音反应、认真接话，且后两轮无第二次生成；收尾真实浏览器又验证一轮人格回复，首字 267 ms，该轮省略动作标记。证据在忽略的 data/performance-*，完整记录见 docs/LIVE2D-PERFORMANCE.md。
+- 中途因额度用完暂停，源码未丢失。继续后两个本机服务已恢复，密钥仅由忽略的 .env 加载，未显示或提交。仍未接真实语音、Electron 与平台弹幕。下一步优先可靠性/本场记忆，再最小语音。
+
 ## 2026-10-10 Live2D 表演能力核验与接入方向
 
 - 用户希望开始完善 Live2D 表演并询问 AIRI 能否边回答边控制角色。核对固定 HEAD 34576c1，确认有回答流 ACT/情绪/动作控制、Live2D 动作播放和参数姿态控制，以及音频口型管线。表情工具有源码定义，未发现其接入调用方；不能承诺任意模型开箱即有这些动作。

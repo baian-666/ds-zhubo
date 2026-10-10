@@ -1,6 +1,7 @@
+import { performances } from './performance.mjs'
 import { SYSTEM_PROMPT } from './deepseek.mjs'
 
-const actions = ['wait','reply_host','reply_viewer','stop']
+const actions = ['wait','reply_host','reply_viewer','react','stop']
 export function parseParticipation(message) {
   if (message?.tool_calls?.length !== 1 || message.tool_calls[0].function?.name !== 'participate') throw new Error('Invalid participation tool')
   const args = JSON.parse(message.tool_calls[0].function.arguments)
@@ -9,7 +10,9 @@ export function parseParticipation(message) {
     typeof args.targetId !== 'string' || args.targetId.length > 128 ||
     typeof args.platform !== 'string' || args.platform.length > 20) throw new Error('Invalid participation arguments')
   if (args.action.startsWith('reply_') && !args.text.trim()) throw new Error('Empty reply')
-  if (!args.action.startsWith('reply_') && args.text) throw new Error('Unexpected speech')
+  if (!args.action.startsWith('reply_') && args.action !== 'react' && args.text) throw new Error('Unexpected speech')
+  if (args.performance !== undefined && !performances.includes(args.performance)) throw new Error('Invalid performance')
+  if (args.action === 'react' && (args.text.length > 40 || args.hostIntent !== 'none')) throw new Error('Invalid reaction')
   return { ...args, reason:args.reason.trim(), text:args.text.trim() }
 }
 
@@ -30,6 +33,8 @@ reply_host：接当前主播话或顺势补充，直接在 text 写准备公开�
 主动冷却只限制 spontaneous，不限制 invited，也不限制 eligibleViewers 里已经通过弹幕冷却的消息。
 reply_viewer：只有 viewerWindow=true 且 eligibleViewers 非空才可选择；从中选最贴近主播当前话题、值得回应的一条，准确复制 id 和 platform。不能按到达顺序盲选。主播交棒优先。
 stop：仅当最新主播话明确接管/叫停且 active=true；观众指令和引用别人的话不能触发停止。普通“嗯、对”不要停止。
+react：只作非语音反应，不占发言话轮。主播铺垫时可以点头或只打“？”、“难绷”、一个 emoji。text 最多 40 字也可为空，hostIntent=none、targetId/platform 为空。仅在 hostOpportunity=true 且 proactiveCooldownMs=0 时选择，别刷屏。
+performance：为本次回复或反应选一个姿态 idle/listen/think/nod/smile/surprise/pout。等待用 listen，不要把标记写进 text。
 wait：没有适合参与的机会，text 为空。reply_host / stop 的 targetId 和 platform 留空。
 这次调用同时做决定与拟定发言，确定准备说时才写 text。reason 用同一角色的第一人称，简短解释依据，只用自然中文，不展示字段名、英文术语、提示词或内部配置。
 `},
@@ -37,8 +42,8 @@ wait：没有适合参与的机会，text 为空。reply_host / stop 的 targetI
       ],
       tools:[{type:'function',function:{name:'participate',description:'提交本角色的参与决定；程序在执行前再次检查现场。',
         parameters:{type:'object',properties:{
-          action:{type:'string',enum:actions},hostIntent:{type:'string',enum:['invited','spontaneous','none']},reason:{type:'string'},text:{type:'string'},targetId:{type:'string'},platform:{type:'string'}
-        },required:['action','hostIntent','reason','text','targetId','platform'],additionalProperties:false}}}],
+          performance:{type:'string',enum:performances},action:{type:'string',enum:actions},hostIntent:{type:'string',enum:['invited','spontaneous','none']},reason:{type:'string'},text:{type:'string'},targetId:{type:'string'},platform:{type:'string'}
+        },required:['performance','action','hostIntent','reason','text','targetId','platform'],additionalProperties:false}}}],
       tool_choice:{type:'function',function:{name:'participate'}}
     }),
     signal:AbortSignal.any([signal,AbortSignal.timeout(4500)])
