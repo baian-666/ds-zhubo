@@ -6,6 +6,7 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const browser = await chromium.launch({ channel: 'msedge', headless: true })
 const page = await browser.newPage({viewport:{width:1440,height:1050}})
 await page.addInitScript(() => {
+  if (location.origin !== 'http://127.0.0.1:5173') return
   localStorage.setItem('onboarding/completed','true')
   localStorage.setItem('onboarding/skipped','false')
 })

@@ -33,13 +33,14 @@ label{display:block;margin:9px 0}input,textarea,select{background:#0e1823;border
 <details class="timeline"><summary>请求与耗时记录</summary><ol id="timeline"></ol></details>
 </section>
 <section class="panel inputPanel"><div class="panelTitle"><h2>模拟发言台</h2><small>主播 / 弹幕</small></div><div class="scrollControls">
-<div class="controls"><label>导演<select id="mode"><option value="manual">人工导演</option><option value="auto">自动导演 · 规则</option></select></label>
+<div class="controls"><label>导演<select id="mode"><option value="manual">人工导演</option><option value="auto">自动导演</option></select></label>
 <label>回复来源<select id="engine"><option value="deepseek">DeepSeek · 真实 API</option><option value="mock">模拟回复 · 不调用 API</option></select></label></div>
 <div class="switches"><button id="interrupt" class="stop">打断助播</button><label><input id="muted" type="checkbox"> 静音</label></div>
+<label><input id="initiative" type="checkbox"> 自主参与 · DeepSeek</label><small id="initiativeState">读取参与状态…</small>
 <div class="quickStart"><p>先看一次完整的主播 → 导演 → 助播回复。</p><button id="quickReal">一键真实试聊</button><button id="quickDemo" class="secondary">先看模拟效果</button><strong id="testFeedback" role="status">回复和导演决定会出现在中间的聊天气泡里。</strong></div>
 <div class="speakerTabs" role="tablist" aria-label="选择模拟发言者"><button id="hostTab" role="tab" aria-selected="true" aria-controls="hostComposer">主播</button><button id="viewerTab" role="tab" aria-selected="false" aria-controls="viewerComposer">弹幕</button></div>
 <div id="hostComposer" class="composer" role="tabpanel" aria-labelledby="hostTab">
-<label>测试场景<select id="scenario"><option value="handover">明确交棒</option><option value="pause">句中停顿</option><option value="backchannel">短附和</option><option value="stop">明确打断</option><option value="opportunity">未点名话题</option></select></label>
+<label>测试场景<select id="scenario"><option value="handover">明确交棒</option><option value="pause">句中停顿</option><option value="backchannel">短附和</option><option value="stop">明确打断</option><option value="opportunity">未点名话题</option><option value="setup">上下文铺垫 · 年糕</option><option value="natural">自然接梗 · 晾衣机</option><option value="recall">询问之前的猫名</option></select></label>
 <label for="hostText">模拟主播说话</label><textarea id="hostText" maxlength="2000">助播，你怎么看虚拟角色陪伴这件事？</textarea>
 <div class="sendRow"><button id="hostSubmit">发送主播发言</button><button id="manualReply" class="secondary">人工让助播接话</button></div>
 <small>Ctrl / ⌘ + Enter 发送。人工模式提交后，再点“人工让助播接话”。</small>

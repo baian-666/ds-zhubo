@@ -39,8 +39,8 @@ export class Director {
     this.viewerWindow = false
   }
 
-  record(action, reason) {
-    const entry = { id: ++this.traceNumber, at: this.now(), revision: this.revision, action, reason }
+  record(action, reason, details = {}) {
+    const entry = { ...details, id: ++this.traceNumber, at: this.now(), revision: this.revision, action, reason }
     this.onRecord?.(entry)
     this.trace.push(entry)
     if (this.trace.length > 100) this.trace.shift()
@@ -73,6 +73,7 @@ export class Director {
     switch (event.type) {
       case 'mode':
         if (!['manual', 'auto'].includes(event.value)) invalid('mode 需要 manual 或 auto')
+        if (this.mode !== event.value) this.consumedUtterance = this.utterance?.id ?? null
         this.mode = event.value
         this.invalidate('mode_changed')
         break
@@ -191,16 +192,18 @@ export class Director {
       this.now() >= candidate.expiresAt || this.mode !== 'auto' || this.scheduler.muted ||
       this.scheduler.hostSpeaking || this.scheduler.active) return null
     if (candidate.source === 'viewer') {
-      const item = this.scheduler.peekViewer()
+      const item = candidate.semanticSelection ? this.scheduler.eligibleViewers().find(x => x.id === candidate.messageId && x.platform === candidate.platform) : this.scheduler.peekViewer()
       if (!this.viewerWindow || !item || item.id !== candidate.messageId || item.platform !== candidate.platform) return null
       this.invalidate('viewer_decision_consumed')
-      return this.scheduler.beginViewer()
+      const turn = this.scheduler.beginViewer(item)
+      if (turn) Object.assign(turn, { preparedReply:candidate.preparedReply, decisionMs:candidate.decisionMs })
+      return turn
     }
     this.consumedUtterance = this.utterance.id
     if (candidate.intent === 'opportunity') this.lastParticipation = this.now()
     this.invalidate('decision_consumed')
     const turn = this.scheduler.beginHost(candidate.text)
-    if (turn) turn.input.participation = candidate.intent
+    if (turn) { turn.input.participation = candidate.intent; Object.assign(turn, {preparedReply:candidate.preparedReply, decisionMs:candidate.decisionMs}) }
     return turn
   }
 
@@ -240,7 +243,7 @@ export class Director {
   close() { this.pendingSemantic = null; this.semanticJob?.controller.abort() }
 
   proposeViewer() {
-    if (!this.viewerWindow || this.mode !== 'auto' || this.candidate) return
+    if (this.semanticViewer || !this.viewerWindow || this.mode !== 'auto' || this.candidate) return
     const item = this.scheduler.peekViewer()
     if (!item) return
     this.candidate = { id: ++this.nextDecision, revision: this.revision, source: 'viewer',

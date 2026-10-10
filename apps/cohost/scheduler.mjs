@@ -62,12 +62,14 @@ export class Scheduler {
     return this.begin({ source: 'host', text })
   }
 
-  peekViewer() {
+  peekViewer() { return this.eligibleViewers()[0] ?? null }
+
+  eligibleViewers() {
     this.expirePlayback()
     this.prune()
-    if (this.muted || this.hostSpeaking || this.active || this.now() - this.lastViewerReply < this.cooldownMs) return null
+    if (this.muted || this.hostSpeaking || this.active || this.now() - this.lastViewerReply < this.cooldownMs) return []
     return this.queue.filter(item => (item.mentioned || item.selected) && !this.users.has(`${item.platform}:${item.userId}`))
-      .sort((a, b) => Number(Boolean(b.selected)) - Number(Boolean(a.selected)) || a.receivedAt - b.receivedAt)[0] ?? null
+      .sort((a, b) => Number(Boolean(b.selected)) - Number(Boolean(a.selected)) || a.receivedAt - b.receivedAt)
   }
 
   selectViewer(platform, id) {
@@ -78,8 +80,8 @@ export class Scheduler {
     return true
   }
 
-  beginViewer() {
-    const item = this.peekViewer()
+  beginViewer(selection = null) {
+    const item = selection ? this.eligibleViewers().find(x => x.id === selection.id && x.platform === selection.platform) : this.peekViewer()
     if (!item) return null
     this.queue = this.queue.filter(candidate => candidate !== item)
     this.lastViewerReply = this.now()

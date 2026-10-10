@@ -7,6 +7,9 @@ import { Director } from './director.mjs'
 import { streamReply } from './deepseek.mjs'
 import { mockReply } from './mock.mjs'
 import { RoomJournal } from './room-journal.mjs'
+import { Scene } from './scene.mjs'
+import { Participation } from './participation.mjs'
+import { planParticipation } from './participation-model.mjs'
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status }
@@ -45,21 +48,26 @@ function authorized(request, token) {
   return actual.length === expected.length && timingSafeEqual(actual, expected)
 }
 
-export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = process.env.DEEPSEEK_MODEL || 'deepseek-flash', token = process.env.COHOST_ACCESS_TOKEN || '', scheduler = new Scheduler(), director = new Director({ scheduler }), reply = streamReply } = {}) {
+export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = process.env.DEEPSEEK_MODEL || 'deepseek-flash', token = process.env.COHOST_ACCESS_TOKEN || '', scheduler = new Scheduler(), director = new Director({ scheduler }), reply = streamReply, semanticEnabled = false, planner, participationOptions = {} } = {}) {
   const page = readFileSync(new URL('./index.html', import.meta.url))
   const histories = { deepseek: [], mock: [] }
   const room = new RoomJournal()
+  const scene = new Scene()
+  const participation = new Participation({ ...participationOptions, director, scheduler, scene,
+    plan:planner ?? (apiKey ? (snapshot, options) => planParticipation(snapshot, {...options, apiKey, model}) : null), enabled:semanticEnabled && Boolean(apiKey || planner) })
   director.onRecord = entry => {
+    if (entry.reason === 'needs_semantic_evidence' && participation.enabled) entry = {...entry, explanation:'我正在听这句话的意思，判断该接话还是继续等。'}
     const previous = room.entries.at(-1)
     // The transcript and speech-end can repeat one rule decision; show one explanation.
     if (previous?.role === 'director' && previous.reason === entry.reason &&
       previous.action === entry.action && previous.directorRevision === entry.revision) return
     room.add('director', '', { action: entry.action, reason: entry.reason, traceId: entry.id,
-      directorRevision: entry.revision, at: entry.at })
+      directorRevision: entry.revision, at: entry.at, explanation:entry.explanation, decisionMs:entry.decisionMs })
   }
-  director.onTranscript = ({ text, utterance }) => room.host(text, utterance)
+  director.onTranscript = ({ text, utterance }) => { room.host(text, utterance); scene.host(text, utterance) }
   scheduler.onDelivered = (input, answer) => {
     const engine = input.engine ?? 'deepseek'
+    scene.add('assistant', answer, {engine})
     histories[engine] = [...histories[engine], { role: 'user', content: JSON.stringify(input) }, { role: 'assistant', content: answer }].slice(-12)
   }
   const server = createServer(async (request, response) => {
@@ -85,7 +93,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       if (!path?.startsWith('/api/')) throw new HttpError(404, '未找到')
       if (!authorized(request, token)) throw new HttpError(401, '请填写正确的助播访问令牌')
       if (request.method === 'GET' && path === '/api/status') {
-        json(response, 200, { ...scheduler.status(), director: director.status(), deepseekConfigured: Boolean(apiKey), model, room: room.status(), queue: scheduler.queue.map(({id,platform,userId,text,mentioned,selected,receivedAt}) => ({id,platform,userId,text,mentioned,selected,expiresAt:receivedAt + scheduler.ttlMs})), stage: '本机文字虚拟直播间；AIRI 网页舞台嵌入，语音尚未连接' })
+        json(response, 200, { ...scheduler.status(), director: director.status(), participation:participation.status(), deepseekConfigured: Boolean(apiKey), model, room: room.status(), queue: scheduler.queue.map(({id,platform,userId,text,mentioned,selected,receivedAt}) => ({id,platform,userId,text,mentioned,selected,expiresAt:receivedAt + scheduler.ttlMs})), stage: '本机文字虚拟直播间；AIRI 网页舞台嵌入，语音尚未连接' })
         return
       }
       if (request.method !== 'POST') throw new HttpError(405, '请使用 POST')
@@ -93,13 +101,22 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       if (!request.headers['content-type']?.startsWith('application/json')) throw new HttpError(415, '需要 application/json')
       if (request.headers['sec-fetch-site'] === 'cross-site') throw new HttpError(403, '不接受跨站请求')
       const body = await readBody(request)
+      if (path === '/api/participation') {
+        if (typeof body.enabled !== 'boolean') throw new HttpError(400, 'enabled 需要布尔值')
+        participation.setEnabled(body.enabled)
+        json(response, 200, participation.status()); return
+      }
       if (path === '/api/director/event') {
+        const previousRevision = director.revision
         const state = director.event(body)
+        if (director.revision !== previousRevision) participation.invalidate()
+        if (body.type === 'topic-change') scene.clear()
+        participation.notify()
         if (body.type === 'speech-end' && director.mode === 'manual' && director.utterance?.id === body.utterance &&
           director.utterance.final && !['stop', 'backchannel'].includes(director.intent) &&
           !room.entries.some(x => x.reason === 'manual_wait' && x.utterance === body.utterance))
           room.add('director', '', { action: 'hold', reason: 'manual_wait', utterance: body.utterance })
-        json(response, 200, { director: state, ...scheduler.status(), room: room.status() })
+        json(response, 200, { director: state, participation:participation.status(), ...scheduler.status(), room: room.status() })
         return
       }
       if (path === '/api/playback') {
@@ -112,6 +129,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       }
       if (path === '/api/host-speaking' || path === '/api/mute') {
         if (typeof body.value !== 'boolean') throw new HttpError(400, 'value 需要布尔值')
+        participation.invalidate()
         director.reset(path === '/api/mute' ? 'manual_mute_changed' : 'manual_host_override')
         if (path === '/api/mute') scheduler.setMuted(body.value)
         else scheduler.setHostSpeaking(body.value)
@@ -119,12 +137,15 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
         return
       }
       if (path === '/api/interrupt') {
+        participation.invalidate()
         director.reset('manual_interrupt')
         scheduler.interrupt()
         json(response, 200, scheduler.status())
         return
       }
       if (path === '/api/reset') {
+        participation.invalidate(); participation.lastDecision=null; participation.lastKey=null
+        scene.clear()
         room.clear()
         director.reset('reset', { clearSpeech: true })
         scheduler.interrupt()
@@ -150,6 +171,12 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
         }
         const accepted = scheduler.enqueue(message)
         if (accepted) {
+          if (director.candidate?.preparedReply) {
+            if (!director.candidate.source) participation.observedUtterance=null
+            director.invalidate('scene_changed')
+          }
+          scene.add('viewer', message.text, {userId:message.userId, platform:message.platform, messageId:message.id})
+          participation.notify()
           room.add('viewer', message.text, { userId: message.userId, platform: message.platform, messageId: message.id })
           const reason = director.mode === 'manual' ? 'viewer_manual_wait' :
             !director.viewerWindow ? 'viewer_window_closed' :
@@ -170,8 +197,16 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       if (body.delivery !== undefined && !['text', 'audio'].includes(body.delivery)) throw new HttpError(400, 'delivery 无效')
       if (body.source === 'director' && !Number.isSafeInteger(body.decision)) throw new HttpError(400, '需要 decision 编号')
       const text = body.source === 'host' ? textField(body.text) : null
-      if (body.source === 'host') room.host(text, director.utterance?.final && director.utterance.text === text ? director.utterance.id : null)
-      if (body.source !== 'director') director.invalidate('manual_reply')
+      if (body.source === 'host') {
+        const utterance = director.utterance?.final && director.utterance.text === text ? director.utterance.id : null
+        room.host(text, utterance); scene.host(text, utterance)
+      }
+      if (engine === 'mock' && body.source === 'director' && director.candidate?.preparedReply) throw new HttpError(409, '切换到模拟回复前请关闭自主参与')
+      participation.invalidate()
+      if (body.source !== 'director') {
+        director.invalidate('manual_reply')
+        if (body.source === 'host' && director.utterance?.text === text) director.consumedUtterance = director.utterance.id
+      }
       const turn = body.source === 'host' ? scheduler.beginHost(text) : body.source === 'director' ? director.consume(body.decision) : scheduler.beginViewer()
       if (!turn) throw new HttpError(409, '当前保持安静：主播在说话、已静音、正在回答、冷却中，或没有合适弹幕')
       turn.input.engine = engine
@@ -179,7 +214,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       const answerSession = room.session
       const generatedAt = Date.now()
       const answerEntry = room.add('assistant', '', { turn: turn.id, engine, model: engine === 'mock' ? '模拟回复' : model,
-        source: turn.input.source, replyingTo: turn.input.text, status: 'generating', firstMs: null })
+        source: turn.input.source, replyingTo: turn.input.text, status: 'generating', firstMs: null, decisionMs:turn.decisionMs })
       const updateAnswer = fields => room.update(answerEntry, fields)
       response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' })
       const send = value => { if (!response.destroyed) response.write(`${JSON.stringify({ ...value, turn: turn.id, audioId: turn.audioId })}\n`) }
@@ -191,7 +226,9 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       send({ type: 'start', engine, model: engine === 'mock' ? '模拟回复' : model, turn: turn.id, source: turn.input.source, entry: { ...answerEntry }, session: answerSession })
       let completed = false
       try {
-        for await (const chunk of (engine === 'mock' ? mockReply : reply)({ apiKey, model, history: [...histories[engine]], input: turn.input, signal: turn.controller.signal })) {
+        const chunks = turn.preparedReply && engine === 'deepseek' ? [turn.preparedReply] :
+          (engine === 'mock' ? mockReply : reply)({ apiKey, model, history: [...histories[engine]], scene:scene.snapshot(engine), input: turn.input, signal: turn.controller.signal })
+        for await (const chunk of chunks) {
           if (!scheduler.isCurrent(turn)) break
           turn.answer += chunk
           updateAnswer({ text: turn.answer, firstMs: answerEntry.firstMs ?? Date.now() - generatedAt })
@@ -222,7 +259,9 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
   })
   server.requestTimeout = 15_000
   server.headersTimeout = 10_000
-  server.on('close', () => director.close())
+  const tick = setInterval(() => { director.status(); participation.notify() }, 250)
+  tick.unref()
+  server.on('close', () => { clearInterval(tick); participation.close(); director.close() })
   return server
 }
 
@@ -232,7 +271,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be 1–65535.')
   if (!['127.0.0.1', '::1', 'localhost'].includes(host) && (process.env.COHOST_ACCESS_TOKEN?.length ?? 0) < 24)
     throw new Error('Set COHOST_ACCESS_TOKEN (24+ characters) before binding beyond loopback.')
-  const server = createApp()
+  const server = createApp({semanticEnabled:Boolean(process.env.DEEPSEEK_API_KEY)})
   server.listen(port, host, () => console.log(`文字联调台 http://${host}:${port} — 本机网页版虚拟直播间 · 语音与真实弹幕尚未接入`))
   const stop = () => { server.close(); server.closeAllConnections() }
   process.on('SIGTERM', stop)
