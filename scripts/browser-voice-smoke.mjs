@@ -17,6 +17,7 @@ const page=await browser.newPage({viewport:{width:1600,height:1040}})
 const errors=[];page.on('pageerror',e=>errors.push(e.message))
 try{
  await page.goto(base)
+ await page.locator('#voiceBackend').selectOption('windows')
  await page.locator('#voiceStart').click()
  emit({type:'ready',voice:'test'})
  await page.locator('#voiceState').filter({hasText:'收音中'}).waitFor()

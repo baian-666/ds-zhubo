@@ -42,4 +42,18 @@ The desktop page supplies its own model-ready state. It does not use web startup
 The same pose driver handles expiry and disconnect release on both surfaces.
 Credentials stay in the main process. The renderer receives only the bounded performance command.
 Desktop settings live in the ignored data/desktop-profile directory.
-The local rehearsal uses Windows recognition. Upstream Sherpaw model downloads remain lazy in this profile.
+The rehearsal uses AIRI voice capture and a fixed SiliconFlow proxy. Windows recognition stays available as a separate fallback.
+
+
+## Shared voice bridge
+
+use-cohost-voice.ts belongs to stage-ui and serves both stages. patch-voice.mjs installs it and hooks Stage playback.
+The pinned revision check runs in patch-airi.mjs. The overlay refuses to replace unrecorded local source edits.
+
+One stage lease owns capture and playback. The server consumes automatic decisions and streams text through polling snapshots.
+AIRI detects speech, encodes recordings, invokes its transcription adapter, and chunks speech through its existing pipeline.
+The local server fixes the speech provider and keeps all API credentials in the ignored .env.
+
+Each turn confirms completed playback segments. Failed turns cannot reopen from delayed snapshots.
+Stopping a lease cancels cloud requests, playback, and capture. Raw microphone audio is not saved automatically.
+The cloud receives speech segments for recognition. Use headphones for the first human trial.

@@ -35,4 +35,6 @@ const esbuild=await import(pathToFileURL(viteRequire.resolve('esbuild')))
 const bundle=await esbuild.build({metafile:true,entryPoints:[join(destination,'cohost-parent.ts')],bundle:true,format:'esm',minify:true,
   outfile:join(root,'apps/cohost/stage-bridge.mjs'),legalComments:'eof'})
 writeFileSync(join(root,'data/airi-overlay/bundle-inputs.json'),JSON.stringify(bundle.metafile.inputs,null,2))
+const voicePatch=spawnSync(process.execPath,[join(root,'scripts/patch-voice.mjs')],{cwd:root,stdio:'inherit'})
+if(voicePatch.status!==0)throw new Error('Shared voice overlay failed')
 console.log('Applied pinned AIRI cohost overlay and rebuilt the parent bridge.')

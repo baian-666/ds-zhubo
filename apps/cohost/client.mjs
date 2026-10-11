@@ -94,6 +94,7 @@ async function refresh() {
 }
 
 function autoReply() {
+  if (state?.airi?.active) return
   if (state?.voice?.active && state.voice.owner !== voiceOwner) return
   const candidate = state?.director?.candidate
   if (submitting || activeRequest || state?.director?.mode !== 'auto' || !candidate || candidate.id <= attemptedDecision) return
@@ -109,6 +110,7 @@ function autoReply() {
   void generate('director', candidate.id)
 }
 async function generate(source, decision) {
+  if (state?.airi?.active && $('engine').value==='mock') {feedback('AIRI 语音使用真实回复，请先切换回复来源');return}
   if (activeRequest) { feedback('已有回答，先打断或等待完成'); return }
   const controller = new AbortController(); activeRequest = controller; activeTurn = null
   const started = performance.now(), engine = $('engine').value
@@ -136,7 +138,7 @@ async function generate(source, decision) {
         }
         if (['done','cancelled','error'].includes(item.type)) {
           ended=true
-          feedback(item.type === 'done' ? (item.awaitingPlayback ? '文字已生成，正在交给系统声音朗读' : '文字回答完成') : item.type === 'cancelled' ? '已打断，未完成回复不进入上下文' : item.message)
+          feedback(item.type === 'done' ? (item.awaitingPlayback ? '文字已生成，舞台正在分句发声' : '文字回答完成') : item.type === 'cancelled' ? '已打断，未完成回复不进入上下文' : item.message)
           trace(item.type === 'done' ? '完成' : item.type === 'cancelled' ? '打断' : '失败', $('result').textContent)
         }
       }
@@ -260,7 +262,7 @@ function renderMessage(entry) {
     entry.text || (entry.status === 'generating' ? '正在想怎么回答…' : entry.status === 'cancelled' ? '还没说出文字就被打断了。' : '没有收到回复文字。')
   const labels = {generating:'正在回复…',completed:'回答完成',cancelled:'已打断 · 保留可见片段',failed:'调用失败',awaitingPlayback:'等待朗读',speaking:'正在朗读'}
   node.status.textContent = entry.role === 'assistant' ?
-    [entry.performance ? '表演意图：'+poseNames[entry.performance] : '', entry.engine === 'mock' ? '模拟回复 · 无 API 调用' : entry.model, entry.decisionMs !== undefined ? '判断与拟稿 ' + entry.decisionMs + ' ms' : entry.firstMs == null ? '' : '生成首字 ' + entry.firstMs + ' ms', labels[entry.status], entry.error].filter(Boolean).join(' · ') : entry.decisionMs !== undefined ? '自主判断 ' + entry.decisionMs + ' ms' : ''
+    [entry.performance ? '表演意图：'+poseNames[entry.performance] : '', entry.engine === 'mock' ? '模拟回复 · 无 API 调用' : entry.model, entry.decisionMs !== undefined ? '判断与拟稿 ' + entry.decisionMs + ' ms' : entry.firstMs == null ? '' : '生成首字 ' + entry.firstMs + ' ms', (entry.status==='completed' && entry.firstAudioMs!==undefined ? '播出完成' : labels[entry.status]), entry.firstAudioMs===undefined ? '' : '首声 '+entry.firstAudioMs+' ms', entry.error].filter(Boolean).join(' · ') : entry.decisionMs !== undefined ? '自主判断 ' + entry.decisionMs + ' ms' : ''
   node.status.hidden = !node.status.textContent
   $('chatEmpty').hidden = messageNodes.size > 0
   if (pinned) $('chatScroll').scrollTop = $('chatScroll').scrollHeight
@@ -374,6 +376,24 @@ bind('quickReal', () => runQuickTrial('deepseek'))
 
 function renderVoice(voice) {
   if (!voice) return
+  const cloud = state?.airi
+  const isCloud = $('voiceBackend').value === 'airi'
+  $('voiceBackend').disabled = Boolean(voice.active || cloud?.active)
+  $('voiceStageLabel').hidden = !isCloud
+  $('voiceStage').disabled = Boolean(cloud?.active)
+  $('voiceOutputLabel').hidden = isCloud
+  if (isCloud && cloud) {
+    const owned=cloud.control===voiceOwner
+    const connected=cloud.stages.some(stage=>stage.stage===$('voiceStage').value && stage.ready)
+    $('voiceStart').disabled=!cloud.configured || cloud.active || voice.active || !connected
+    $('voiceStop').disabled=!cloud.active || !owned
+    $('voiceLevel').hidden=true
+    $('voiceConfirm').hidden=true
+    $('voiceState').textContent=cloud.error || (cloud.active ? !owned ? '另一页已开启 AIRI 语音' : !cloud.ready ? '正在连接舞台…' : cloud.pending ? '正在处理语音…' : state?.playback==='playing' ? '小鲸鱼正在说话 · 可随时打断' : 'AIRI 收音中 · 请说一句话后停顿' : !cloud.configured ? '尚未配置云端语音账号' : !connected ? '请先打开所选舞台，等待角色加载' : '舞台已连接 · 点击开始后开启麦克风')
+    $('voiceTranscript').textContent=cloud.final ? '刚刚听到：'+cloud.final+(cloud.asrMs===null ? '' : '（识别 '+cloud.asrMs+' ms）') : '识别的主播话语和小鲸鱼回复会进入中间聊天。'
+    return
+  }
+  $('voiceLevel').hidden=false
   const owned = voice.owner === voiceOwner
   $('voiceStart').disabled = !voice.available || voice.active
   $('voiceStop').disabled = !voice.active || !owned
@@ -385,7 +405,13 @@ function renderVoice(voice) {
   $('voiceConfirm').hidden = !voice.uncertain || !owned
   $('voiceTranscript').textContent = voice.uncertain ? '这句识别不确定：' + voice.uncertain : voice.partial ? '正在听：' + voice.partial : voice.final ? '刚刚听到：' + voice.final : '你的话会自动进入中间聊天。'
 }
+bind('voiceBackend',async()=>renderVoice(state?.voice),'change')
+bind('voiceStage',async()=>renderVoice(state?.voice),'change')
 bind('voiceStart', async () => {
+  if ($('voiceBackend').value==='airi') {
+    if ($('engine').value!=='deepseek') throw new Error('请先在更多设置中切换到真实 DeepSeek 回复')
+    await api('airi/start',{owner:voiceOwner,stage:$('voiceStage').value});return
+  }
   renderVoice(await (await api('voice/start', {owner:voiceOwner,output:$('voiceOutput').checked})).json())
 })
 bind('voiceConfirm', async () => {
@@ -395,9 +421,12 @@ bind('voiceConfirm', async () => {
   feedback('已填入主播输入框，确认或改正后点“说完这句，发送”。')
 })
 bind('voiceStop', async () => {
+  if(state?.airi?.active) {await api('airi/stop',{owner:voiceOwner});return}
   renderVoice(await (await api('voice/stop', {owner:voiceOwner})).json())
 })
 window.addEventListener('pagehide', () => {
+  if(state?.airi?.control===voiceOwner)
+    void fetch('/api/airi/stop',{method:'POST',headers:headers(),body:JSON.stringify({owner:voiceOwner}),keepalive:true}).catch(()=>{})
   if (state?.voice?.owner === voiceOwner)
     void fetch('/api/voice/stop', {method:'POST',headers:headers(),body:JSON.stringify({owner:voiceOwner}),keepalive:true}).catch(()=>{})
 })

@@ -64,7 +64,7 @@ AIRI 负责设备、供应商适配、角色、播放与口型。cohost 是唯�
 - TTS 候选：FunAudioLLM/CosyVoice2-0.5B，先用内置中文音色，听过样本后确定。
 - DeepSeek 对话仍使用现有服务与模型，不迁移已有配置。
 - AIRI 复用兼容语音入口；cohost 本机代理仅转发所选识别/合成端点，固定供应商目标，不做任意 URL 转发平台。
-- 尚无该账号/凭据，未进行实际调用；注册、当前模型可用性与付费开通以用户账户为准，不声称已测价格或最低费用。
+- 已配置本机凭据并完成合成样本的真实 ASR/TTS 调用及 AIRI 桥接。真人短句与长尾延迟仍待验收，不声称已测价格或最低费用。
 
 官方资料：
 - https://docs.siliconflow.cn/docs/api/audio-transcriptions-post
