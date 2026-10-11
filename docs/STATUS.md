@@ -2,6 +2,12 @@
 
 更新：2026-10-11。
 
+## 2026-10-11 关闭鼠标眼神跟随
+
+- 按用户要求，在本机 cohost 网页连接和桌面连接初始化时，关闭 AIRI 原生 live2dEyeTracking 设置。可重放源码同步两端，刷新后继续关闭；普通眨眼、待机活动、导演姿态、表情和音频口型路径保持原有实现。
+- 实际网页与桌面刷新验证：设置与 Model 的 eyeTracking 属性均为 false，idle 与 blink 开关仍为 true。网页故意以原先开启的鼠标跟随配置启动，也成功关闭。未开启真人麦克风、未调用付费模型。
+- npm run check 通过，npm test 81/81；AIRI 现有 live2d 设置与 motion-manager 两个测试文件 26/26。pnpm -F @proj-airi/stage-web typecheck 与 pnpm -F @proj-airi/stage-tamagotchi typecheck 均通过；pnpm lint 执行后因已有 @radix-ui/colors 缺失退出 2，未标为通过。本机日志 data/no-mouse-root-lint.log。
+
 ## 2026-10-11 电脑意外重启后的恢复与最终复查
 
 - 未提交的 Live2D 源码、可重放补丁、忽略模型副本及桌面配置均完整保留。恢复 cohost 8787、网页 5173、桌面 5174；保持真人麦克风关闭，没有新增付费接口调用。

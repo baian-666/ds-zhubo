@@ -217,6 +217,7 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
 
   onMounted(() => {
     if (connect) {
+      live2d.live2dEyeTracking = false
       external = connect(receive)
       timer = setInterval(tick, 100)
       return
@@ -224,6 +225,7 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
     const parentOrigin = new URLSearchParams(location.search).get('cohostOrigin')
     if (window.parent === window || !parentOrigin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(parentOrigin))
       return
+    live2d.live2dEyeTracking = false
     runtime = createContext({ channel, currentWindow: window, targetWindow: () => window.parent, expectedSource: () => window.parent, expectedOrigin: parentOrigin, targetOrigin: parentOrigin })
     runtime.context.on(commandEvent, ({ body }) => receive(body))
     timer = setInterval(tick, 100)
