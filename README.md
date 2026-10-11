@@ -4,6 +4,8 @@
 
 **当前是 Windows 本机试播原型，尚不是可直接开播的产品。** 已有文字直播间、同角色聊天气泡与导演时间线、DeepSeek 自主参与、小鲸鱼人格、AIRI 网页和 Electron 默认形象联动，以及本机中文识别与系统朗读。真人识别质量/自然话轮尚未验收；口型、真实平台弹幕和生产部署未完成。
 
+当前需求与实施顺序见 [开发基线](docs/DEVELOPMENT-BASELINE.md)。
+
 当前推荐入口：[桌面与语音试播](docs/DESKTOP-VOICE.md)、[文字模拟直播](docs/TEXT-ROOM.md)、[本地开发](docs/LOCAL-DEVELOPMENT.md)。下方云端配置保留为备选路径。
 
 ## 在另一台设备继续
