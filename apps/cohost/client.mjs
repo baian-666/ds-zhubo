@@ -2,12 +2,12 @@ import { connectStage } from './stage-bridge.mjs'
 const $ = id => document.getElementById(id)
 const voiceOwner = crypto.randomUUID()
 let voiceLeaseAt = 0
-const poseNames={idle:'待机',listen:'倾听',think:'思考',nod:'点头',smile:'轻笑',surprise:'惊讶',pout:'嘴硬'}
+const poseNames={idle:'待机',listen:'倾听',think:'思考',nod:'点头',smile:'轻笑',surprise:'惊讶',pout:'嘴硬',sequence:'自主表演'}
 let stageSeen=0, stageReady=false
 const stageBridge=connectStage($('stage'), status=>{
   stageSeen=Date.now()
   stageReady=status.ready
-  $('performanceState').textContent=status.ready ? '角色已连接 · '+poseNames[status.name]+(status.expression ? ' · 表情：'+status.expression : ' · 本机表演') : '表演桥接已连接 · 等待 Live2D 模型加载'
+  $('performanceState').textContent=status.ready ? '角色已连接 · '+(status.label || poseNames[status.name])+(status.waiting ? ' · 等待出声' : status.step ? ' · 第 '+status.step+' 段' : '')+(status.expression ? ' · 表情：'+status.expression : ' · 本机表演') : '表演桥接已连接 · 等待 Live2D 模型加载'
 })
 for(const button of document.querySelectorAll('[data-pose]'))button.onclick=()=>safe(()=>api('performance',{name:button.dataset.pose}))
 
@@ -263,7 +263,7 @@ function renderMessage(entry) {
     entry.text || (entry.status === 'generating' ? '正在想怎么回答…' : entry.status === 'cancelled' ? '还没说出文字就被打断了。' : '没有收到回复文字。')
   const labels = {generating:'正在回复…',completed:'回答完成',cancelled:'已打断 · 保留可见片段',failed:'调用失败',awaitingPlayback:'等待朗读',speaking:'正在朗读'}
   node.status.textContent = entry.role === 'assistant' ?
-    [entry.performance ? '表演意图：'+poseNames[entry.performance] : '', entry.engine === 'mock' ? '模拟回复 · 无 API 调用' : entry.model, entry.decisionMs !== undefined ? '判断与拟稿 ' + entry.decisionMs + ' ms' : entry.firstMs == null ? '' : '生成首字 ' + entry.firstMs + ' ms', (entry.status==='completed' && entry.firstAudioMs!==undefined ? '播出完成' : labels[entry.status]), entry.firstAudioMs===undefined ? '' : '首声 '+entry.firstAudioMs+' ms', entry.error].filter(Boolean).join(' · ') : entry.decisionMs !== undefined ? '自主判断 ' + entry.decisionMs + ' ms' : ''
+    [entry.performance ? '表演意图：'+(entry.motionLabel || poseNames[entry.performance]) : '', entry.engine === 'mock' ? '模拟回复 · 无 API 调用' : entry.model, entry.decisionMs !== undefined ? '判断与拟稿 ' + entry.decisionMs + ' ms' : entry.firstMs == null ? '' : '生成首字 ' + entry.firstMs + ' ms', (entry.status==='completed' && entry.firstAudioMs!==undefined ? '播出完成' : labels[entry.status]), entry.firstAudioMs===undefined ? '' : '首声 '+entry.firstAudioMs+' ms', entry.error].filter(Boolean).join(' · ') : entry.decisionMs !== undefined ? '自主判断 ' + entry.decisionMs + ' ms' : ''
   node.status.hidden = !node.status.textContent
   $('chatEmpty').hidden = messageNodes.size > 0
   if (pinned) $('chatScroll').scrollTop = $('chatScroll').scrollHeight
@@ -333,7 +333,7 @@ bind('refresh',refresh)
 bind('reset',async () => { await api('reset',{}); activeRequest?.abort(); $('answer').textContent='本场已清空'; utterance=null })
 bind('reloadStage',() => { $('stageState').textContent='等待加载'; $('stage').src=stageUrl })
 bind('engine',async () => { if(activeRequest || state?.busy) { $('engine').value=$('replyLabel').textContent.startsWith('模拟') ? 'mock' : 'deepseek'; throw new Error('请先完成或打断当前回答再切换回复来源') } sessionStorage.setItem('rehearsalEngine',$('engine').value); await api('participation',{enabled:$('engine').value==='deepseek' && Boolean(state?.participation?.configured)}); trace('回复来源',$('engine').selectedOptions[0].textContent) },'change')
-const scenarios={natural:'你说我这跑步机是不是该改名叫晾衣机？',setup:'我的猫叫年糕，它每天霸占跑步机。先听我把故事讲完。',recall:'助播，你觉得刚才那只猫叫什么名字？',handover:'助播，你怎么看虚拟角色陪伴这件事？',pause:'说到这个问题，我先想一想，',backchannel:'嗯，对',stop:'等一下',opportunity:'今天这个故事真有意思，我刚刚突然想到了一个新角度。'}
+const scenarios={tease:'小鲸鱼，你是不是又在摸鱼？被我抓到了吧，怎么解释！',compliment:'小鲸鱼，你刚才那个吐槽真的好好笑，被夸了有什么反应？',natural:'你说我这跑步机是不是该改名叫晾衣机？',setup:'我的猫叫年糕，它每天霸占跑步机。先听我把故事讲完。',recall:'助播，你觉得刚才那只猫叫什么名字？',handover:'助播，你怎么看虚拟角色陪伴这件事？',pause:'说到这个问题，我先想一想，',backchannel:'嗯，对',stop:'等一下',opportunity:'今天这个故事真有意思，我刚刚突然想到了一个新角度。'}
 bind('scenario',async () => { $('hostText').value=scenarios[$('scenario').value] },'change')
 $('stage').addEventListener('load',() => { $('stageState').textContent='已加载 iframe · 形象待画面确认' })
 setInterval(() => { if(!refreshing) void refresh().catch(error => { $('status').textContent=error.message }) },400)

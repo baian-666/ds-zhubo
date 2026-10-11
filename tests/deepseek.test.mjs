@@ -31,7 +31,7 @@ test('DeepSeek request uses server key, bounded output and disabled thinking', a
   assert.equal(request.headers.Authorization, 'Bearer test-only')
   assert.equal(sent.thinking.type, 'disabled')
   assert.equal(sent.stream, true)
-  assert.equal(sent.max_tokens, 256)
+  assert.equal(sent.max_tokens, 640)
   assert.equal(sent.messages.at(-1).role, 'user')
   assert.deepEqual(chunks, ['好呀'])
 })

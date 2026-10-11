@@ -197,14 +197,14 @@ export class Director {
       if (!this.viewerWindow || !item || item.id !== candidate.messageId || item.platform !== candidate.platform) return null
       this.invalidate('viewer_decision_consumed')
       const turn = this.scheduler.beginViewer(item)
-      if (turn) Object.assign(turn, { preparedReply:candidate.preparedReply, performance:candidate.performance, decisionMs:candidate.decisionMs })
+      if (turn) Object.assign(turn, { preparedReply:candidate.preparedReply, performance:candidate.performance, motion:candidate.motion, decisionMs:candidate.decisionMs })
       return turn
     }
     this.consumedUtterance = this.utterance.id
     if (candidate.intent === 'opportunity') this.lastParticipation = this.now()
     this.invalidate('decision_consumed')
     const turn = this.scheduler.beginHost(candidate.text)
-    if (turn) { turn.input.participation = candidate.intent; Object.assign(turn, {preparedReply:candidate.preparedReply, performance:candidate.performance, decisionMs:candidate.decisionMs}) }
+    if (turn) { turn.input.participation = candidate.intent; Object.assign(turn, {preparedReply:candidate.preparedReply, performance:candidate.performance, motion:candidate.motion, decisionMs:candidate.decisionMs}) }
     return turn
   }
 

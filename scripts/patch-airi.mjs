@@ -26,7 +26,7 @@ if(existsSync(localModel)) {
 }
 const destination=join(vendor,'apps/stage-web/src/cohost')
 mkdirSync(destination,{recursive:true})
-for(const name of ['cohost-contract.ts','cohost-parent.ts','use-cohost-performance.ts']) {
+for(const name of ['cohost-contract.ts','cohost-parent.ts','use-cohost-performance.ts','motion-sequence.ts']) {
   const source=readFileSync(join(root,'integrations/airi',name))
   const path=join(destination,name)
   // Owned overlay files can be updated only when they match the previous installation.

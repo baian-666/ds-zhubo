@@ -18,9 +18,9 @@ function install(relative, contents) {
   if (!existsSync(destination) || !readFileSync(destination).equals(contents)) writeFileSync(destination, contents)
   writeFileSync(saved, contents)
 }
-for (const name of ['cohost-contract.ts','use-cohost-performance.ts','cohost-desktop.ts'])
+for (const name of ['cohost-contract.ts','use-cohost-performance.ts','cohost-desktop.ts','motion-sequence.ts','motion-sequence.test.ts'])
   install('src/renderer/cohost/' + name, readFileSync(join(root,'integrations/airi',name)))
-for (const name of ['cohost-contract.ts','desktop-main.ts'])
+for (const name of ['cohost-contract.ts','desktop-main.ts','motion-sequence.ts'])
   install('src/cohost/' + name, readFileSync(join(root,'integrations/airi',name)))
 function hook(relative, anchor, replacement) {
   const destination = join(appRoot,relative)

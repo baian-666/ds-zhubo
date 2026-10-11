@@ -125,3 +125,23 @@ test('speech proxy fixes provider and model, validates current reply, and cancel
   await app.post('/api/interrupt',{})
   assert.equal((await app.post('/api/airi/stage/audio/speech',{turn:turn.id,input:'你好。'},app.headers)).status,409)
 })
+
+test('free motion starts on accepted audio playback and stale audio cannot restart it',async t=>{
+ const motion={label:'侧目',frames:[{ms:1200,pose:{eyeX:0.5}}]}
+ const app=await setup(t,{reply:async function*(){yield '你好。';yield '<act:'+JSON.stringify(motion)+'>'}})
+ await(await app.post('/api/reply',{source:'host',text:'试一次动作',voiceOwner:'console-owner'})).text()
+ const read=()=>fetch(app.url+'/api/status').then(r=>r.json())
+ let state=await read();assert.equal(state.performance.name,'sequence');assert.equal(state.performance.startedAt,null)
+ const {turn}=await(await app.pulse()).json()
+ const event=audioId=>app.event({type:'playback',event:'started',playedChars:0,turn:turn.id,audioId})
+ assert.equal((await(await event('wrong')).json()).accepted,false)
+ assert.equal((await read()).performance.startedAt,null)
+ assert.equal((await(await event(turn.audioId)).json()).accepted,true)
+ state=await read();const startedAt=state.performance.startedAt
+ assert.equal(typeof startedAt,'number')
+ assert.equal((await(await event(turn.audioId)).json()).accepted,false)
+ assert.equal((await read()).performance.startedAt,startedAt)
+ await app.post('/api/interrupt',{})
+ assert.equal((await(await event(turn.audioId)).json()).accepted,false)
+ assert.equal((await read()).performance.name,'idle')
+})

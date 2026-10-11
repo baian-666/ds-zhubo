@@ -1,5 +1,6 @@
 import { AiriVoice } from './airi-voice.mjs'
 import { WindowsVoice } from './windows-voice.mjs'
+import { parseMotionSequence } from '../../integrations/airi/motion-sequence.ts'
 import { Performance, performedText, performances } from './performance.mjs'
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
@@ -58,8 +59,8 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
   const performance = new Performance()
   const participation = new Participation({ ...participationOptions, director, scheduler, scene,
     onReaction: result => {
-      performance.play(result.performance ?? 'nod', {source:'reaction'})
-      room.add('assistant',result.text || '（姿态回应）',{status:'completed',delivery:'reaction',engine:'deepseek',model,performance:result.performance})
+      performance.play(result.performance ?? 'nod', {source:'reaction',motion:result.motion})
+      room.add('assistant',result.text || '（姿态回应）',{status:'completed',delivery:'reaction',engine:'deepseek',model,performance:result.motion ? 'sequence' : result.performance,motionLabel:result.motion?.label})
       scene.add('assistant',result.text || '非语音回应',{engine:'deepseek',delivery:'reaction'})
     },
     plan:planner ?? (apiKey ? (snapshot, options) => planParticipation(snapshot, {...options, apiKey, model}) : null), enabled:semanticEnabled && Boolean(apiKey || planner) })
@@ -83,6 +84,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
     onPlayback: body => {
       const entry = room.entries.find(item => item.role === 'assistant' && item.turn === body.turn)
       const accepted = scheduler.playbackEvent(body)
+      if (accepted && body.event === 'started') performance.start(body.turn)
       if (accepted && entry) room.update(entry, {status: body.event === 'ended' ? 'completed' : ['stopped','error'].includes(body.event) ? 'cancelled' : 'speaking', playedChars:body.playedChars})
       return accepted
     },
@@ -100,6 +102,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
   function playback(body) {
     const entry = room.entries.find(item => item.role === 'assistant' && item.turn === body.turn)
     const accepted = scheduler.playbackEvent(body)
+    if (accepted && body.event === 'started') performance.start(body.turn)
     if (accepted && entry) room.update(entry, {status:body.event === 'ended' ? 'completed' : ['stopped','error'].includes(body.event) ? 'cancelled' : 'speaking',playedChars:body.playedChars, ...(body.event === 'started' ? {firstAudioMs:Date.now()-entry.at} : {})})
     return accepted
   }
@@ -125,7 +128,6 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
   }
   async function executeTurn(turn, engine, delivery = 'text', response) {
       performance.clear()
-      if (turn.performance) performance.play(turn.performance,{turn:turn.id})
       turn.controller.signal.addEventListener('abort',()=>performance.cancel(turn.id),{once:true})
       turn.input.engine = engine
       turn.voiceOwned = Boolean(voice.worker)
@@ -136,10 +138,11 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
         const entry = room.entries.find(item => item.role === 'assistant' && item.turn === turn.id)
         if (entry && entry.status !== 'completed') room.update(entry, {status:'cancelled', playedChars:turn.playedChars})
       }, {once:true})
+      if (turn.performance || turn.motion) performance.play(turn.performance ?? 'idle',{turn:turn.id,motion:turn.motion,defer:turn.delivery==='audio'})
       const answerSession = room.session
       const generatedAt = Date.now()
       const answerEntry = room.add('assistant', '', { turn: turn.id, engine, model: engine === 'mock' ? '模拟回复' : model,
-        performance:turn.performance, source: turn.input.source, replyingTo: turn.input.text, status: 'generating', firstMs: null, decisionMs:turn.decisionMs })
+        performance:turn.motion ? 'sequence' : turn.performance, motionLabel:turn.motion?.label, source: turn.input.source, replyingTo: turn.input.text, status: 'generating', firstMs: null, decisionMs:turn.decisionMs })
       const updateAnswer = fields => room.update(answerEntry, fields)
       response?.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' })
       const send = value => { if (response && !response.destroyed) response.write(`${JSON.stringify({ ...value, turn: turn.id, audioId: turn.audioId })}\n`) }
@@ -153,8 +156,11 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       try {
         const chunks = turn.preparedReply && engine === 'deepseek' ? [turn.preparedReply] :
           (engine === 'mock' ? mockReply : reply)({ apiKey, model, history: [...histories[engine]], scene:scene.snapshot(engine), input: turn.input, signal: turn.controller.signal })
-        for await (const chunk of performedText(chunks, name => {
-          if (scheduler.isCurrent(turn)) { performance.play(name,{turn:turn.id});updateAnswer({performance:name}) }
+        for await (const chunk of performedText(chunks, (name,motion) => {
+          if (scheduler.isCurrent(turn)) {
+            performance.play(name,{turn:turn.id,motion,defer:turn.delivery==='audio' && turn.playback!=='playing'})
+            updateAnswer({performance:name,motionLabel:motion?.label})
+          }
         })) {
           if (!scheduler.isCurrent(turn)) break
           turn.answer += chunk
@@ -312,10 +318,11 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
         throw new HttpError(404, '未找到')
       }
       if (path === '/api/performance') {
-        if (!performances.includes(body.name)) throw new HttpError(400, '未知动作')
+        if (body.motion !== undefined && !parseMotionSequence(body.motion)) throw new HttpError(400, '无效动作序列')
+        if (!performances.includes(body.name) && !(body.name==='sequence' && body.motion)) throw new HttpError(400, '未知动作')
         if (scheduler.muted || scheduler.active) throw new HttpError(409, '请在未静音且空闲时试演')
-        performance.play(body.name,{source:'preview',durationMs:3000})
-        room.add('director','',{action:'hold',reason:'performance_preview',explanation:'我试演一下：' + ({idle:'恢复待机',listen:'倾听',think:'思考',nod:'点头',smile:'轻笑',surprise:'惊讶',pout:'嘴硬'})[body.name]})
+        performance.play(body.name,{source:'preview',durationMs:3000,motion:body.motion})
+        room.add('director','',{action:'hold',reason:'performance_preview',explanation:'我试演一下：' + (body.motion?.label ?? ({idle:'恢复待机',listen:'倾听',think:'思考',nod:'点头',smile:'轻笑',surprise:'惊讶',pout:'嘴硬'})[body.name])})
         json(response,200,{accepted:true});return
       }
       if (path === '/api/participation') {

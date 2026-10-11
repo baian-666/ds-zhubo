@@ -1,3 +1,4 @@
+import { parseMotionSequence } from '../../integrations/airi/motion-sequence.ts'
 import { performances } from './performance.mjs'
 // One async planner beside the deterministic director. No serial second generation.
 export class Participation {
@@ -84,6 +85,7 @@ export class Participation {
       typeof result.reason!=='string' || !result.reason.trim() || result.reason.length>180 ||
       typeof result.text!=='string' || result.text.length>800) throw new Error('Invalid action')
     if(result.performance !== undefined && !performances.includes(result.performance))throw new Error('Invalid performance')
+    if(result.motion !== undefined){const motion=parseMotionSequence(result.motion);if(!motion)throw new Error('Invalid motion');result={...result,motion}}
     if (snapshot.hostOpportunity && u?.id === snapshot.latestHost?.id) this.observedUtterance=u.id
     const details={explanation:result.reason,decisionMs}
     this.lastDecision={action:result.action,reason:result.reason,decisionMs,at:this.now()}
@@ -108,14 +110,14 @@ export class Participation {
         d.record('hold','participation_cooldown',{explanation:'我刚补充过一次，这次先让主播继续。'});return
       }
       d.candidate={id:++d.nextDecision,revision:d.revision,text:u.text,intent:result.hostIntent === 'invited' ? 'handover' : 'opportunity',
-        expiresAt:this.now()+1500,preparedReply:result.text,performance:result.performance,decisionMs}
+        expiresAt:this.now()+1500,preparedReply:result.text,performance:result.performance,motion:result.motion,decisionMs}
     } else {
       if(!d.viewerWindow)return
       const item=s.eligibleViewers().find(x=>x.id===result.targetId && x.platform===result.platform)
       if(!item || !snapshot.eligibleViewers.some(x=>x.id===item.id && x.platform===item.platform))return
       d.candidate={id:++d.nextDecision,revision:d.revision,source:'viewer',messageId:item.id,platform:item.platform,
         text:item.text,intent:'viewer',expiresAt:Math.min(this.now()+1500,item.receivedAt+s.ttlMs),
-        preparedReply:result.text,performance:result.performance,decisionMs,semanticSelection:true}
+        preparedReply:result.text,performance:result.performance,motion:result.motion,decisionMs,semanticSelection:true}
     }
     d.record('reply','participation_reply',details)
   }

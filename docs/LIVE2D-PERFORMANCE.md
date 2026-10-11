@@ -19,7 +19,37 @@
 
 表演约三秒后结束；“让小鲸鱼停一下”也能清除当前动作。网页状态行会显示已执行的原生表情名称。桌面角色同步接收这些按钮的指令；本机网页与桌面可以同时显示，但语音仍只有一个舞台收音、出声。
 
-现有导演的 performance 字段和流式回复动作标记已接到这些表演。同一次回复可以带动作，无需增加另一次 AI 请求。本轮验证的是按钮、渲染与音频口型，没有再跑真实 DeepSeek 的角色对话。
+导演及流式回复现在同时支持基础姿态和 AI 自行编排的连续动作。同一次回复携带表演，不额外调用动作模型。基础按钮仍用于人工检查；自主表演的新增验证见下方。
+
+## AI 自主编排（2026-10-11）
+
+刷新控制台，在“更多设置”选择 DeepSeek 回复。右侧“找句话试试”新增“逗逗她：又在摸鱼？”和“夸夸她：吐槽真好笑”。使用人工接话可直接看回应；使用自动导演则由她判断是否回复或只做动作。想明确检查连续动作，可输入：“小鲸鱼，你是不是又在摸鱼？你一边解释，一边自己安排几个连贯的小动作给我看看。”然后发送并让她接话。
+
+舞台下方显示动作名称和执行到第几段，聊天气泡保留本次表演意图。普通对话允许她选择不动作；模拟回复模式不会调用模型编排动作。
+
+- 模型自行选择视线、眯眼、头部、身体、嘴角的幅度和顺序，以及四种已开放表情的强度。每次 1–4 段、总长至多 4 秒，AIRI 在本机平滑过渡并自动释放。不是新增一组固定组合按钮，也不是让模型逐帧计算。
+- integrations/airi/motion-sequence.ts 是服务端与两个舞台共用的限制、校验和采样实现。只开放十个归一化控制轴，未开放任意 Cubism 参数、脚本、服装道具、尾巴或挥手控制。模型绑定本身不支持的形变仍做不出来。
+- 直接回复先流出第一句，随后可携带隐藏的 act 控制段；控制内容不进入字幕、TTS 或历史。自动导演用同一次 participate 工具调用提交决定、公开回复和可选 motion，也可 react 只做无声反应。没有额外引入 MCP 服务或第二次动作推理请求，但增加了提示词与动作输出 token；尚无首声延迟的对照统计。
+- 音频动作在对应播放开始后启动；若动作在语音已经开始后才到达，则当时启动。没有实现逐词对齐。嘴巴开合仍归音频，动作可以与口型并行。过期、打断、断联释放，旧话轮的迟到事件不能重启动作；保留期间的人工表情编辑。
+- 桌面主进程也需要新协议，更新代码后要重启桌面开发窗口，仅刷新角色页面不够。安装器保留可重放源码，不只修改忽略的 vendor。
+
+新增验证：根项目检查和 89 项测试通过；网页和桌面类型检查通过；修改文件 ESLint 通过；原 Live2D 两文件 26 项测试与自由动作采样 2 项测试通过。全仓检查仍有已有依赖阻断，不表示全仓通过。
+
+真实 DeepSeek 回复试验成功编排“被吓一激灵”三段动作，并在网页实际 Cubism 参数与画面上执行。另一次真实导演工具调用选择 react，提交无声三段反应；该次单独工具决策未作为真人现场验收。开发中共用了 3 次真实回复请求和 1 次真实导演请求：前两次回复未通过完整执行验收，其中一次暴露控制结束标签变体，修复后补入所有分片边界的回归并实测通过。
+
+桌面重新加载主进程后，实际四种基础表情、连续动作与恢复均通过，零页面错误，证据 data/whale-desktop-result.json。独立网页验证还覆盖连续强度、人工修改保留、打断、断联释放及零页面错误。合成输入、模拟 ASR/TTS 的原生语音测试确认实际模型口型与动作同时运行，按钮停声单次约 159 ms，停后口型为 0；不是真人麦克风、真实语音供应商或延迟统计验收。
+
+本机证据：忽略的 data/free-motion-real-result.json、data/free-motion-reaction-result.json、data/airi-voice-browser-result.json 及 free-motion 截图。额外复测命令：
+
+```powershell
+# 网页舞台 5173 已运行；PLAYWRIGHT_MODULE 与下方原验证命令相同
+& data/toolchains/node-v26.7.0-win-x64/node.exe scripts/browser-free-performance-smoke.mjs
+& data/toolchains/node-v26.7.0-win-x64/node.exe scripts/browser-airi-voice-smoke.mjs --live2d --free-motion
+& data/toolchains/node-v26.7.0-win-x64/node.exe --env-file-if-exists=.env scripts/desktop-live2d-smoke.mjs --free-motion
+# 以下两项各调用一次真实 DeepSeek，使用本机忽略 .env
+& data/toolchains/node-v26.7.0-win-x64/node.exe --env-file-if-exists=.env scripts/browser-free-performance-smoke.mjs --real
+& data/toolchains/node-v26.7.0-win-x64/node.exe --env-file-if-exists=.env scripts/free-motion-planner-trial.mjs --real
+```
 
 ## 运行包与设置
 
@@ -40,7 +70,7 @@
 
 等待 AIRI 原生角色卡完成初始化，导入选择同时保存到活动角色卡，刷新后保留。首次导入时，网页收音按钮等待模型准备，避免在默认角色刚就绪时提前开始收音，然后被模型替换中止。
 
-## 本轮验收
+## 首批固定表演验收（历史基线）
 
 - npm run check、npm test：通过，81 项回归。
 - AIRI stage-web 与 stage-tamagotchi typecheck：通过。修改的表演文件及回执契约 ESLint：通过。

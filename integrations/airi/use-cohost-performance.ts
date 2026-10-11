@@ -13,6 +13,7 @@ import { onMounted, onUnmounted } from 'vue'
 import * as v from 'valibot'
 
 import { channel, commandEvent, commandSchema, receiptEvent } from './cohost-contract'
+import { sampleMotionSequence } from './motion-sequence'
 
 /**
  * Runs transient poses for the local rehearsal iframe. No model credentials cross this boundary.
@@ -42,6 +43,8 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
   let expressionEntries = expressions.expressions
   let expressionName: Command['name'] = 'idle'
   let nativeExpression = ''
+  let expressionStrength = 0
+  const expressionBlocked = new Set<string>()
   const expressionWrites = new Map<string, { previous: number, written: number }>()
 
   function restoreExpression() {
@@ -56,16 +59,22 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
     nativeExpression = ''
     expressionWrites.clear()
     expressionName = 'idle'
+    expressionStrength = 0
+    expressionBlocked.clear()
   }
 
-  function applyExpression(name: Command['name']) {
-    if (name === expressionName && expressionModel === expressions.modelId && expressionEntries === expressions.expressions)
+  function applyExpression(name: Command['name'], strength = 1) {
+    const same = name === expressionName && expressionModel === expressions.modelId && expressionEntries === expressions.expressions
+    if (same && strength === expressionStrength)
       return
-    restoreExpression()
-    expressionModel = expressions.modelId
-    expressionEntries = expressions.expressions
-    expressionName = name
-    // The local whale adapter exposes these groups. Other models keep pose control.
+    if (!same) {
+      restoreExpression()
+      expressionBlocked.clear()
+      expressionModel = expressions.modelId
+      expressionEntries = expressions.expressions
+      expressionName = name
+    }
+    expressionStrength = strength
     const signature = [['问号', 'ParamCheek74'], ['感叹号', 'ParamCheek75'], ['开心兴奋', 'ParamCheek76'], ['生气', 'ParamCheek80']]
     if (!signature.every(([group, id]) => expressions.expressionGroups.get(group)?.parameters.some(parameter => parameter.parameterId === id)))
       return
@@ -76,14 +85,22 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
       return
     nativeExpression = groupName
     for (const parameter of group.parameters) {
-      // Audio lip sync owns mouth opening even when an expression is active.
-      if (parameter.parameterId === 'ParamMouthOpenY')
+      if (parameter.parameterId === 'ParamMouthOpenY' || expressionBlocked.has(parameter.parameterId))
         continue
       const entry = expressions.expressions.get(parameter.parameterId)
       if (!entry)
         continue
-      expressionWrites.set(parameter.parameterId, { previous: entry.currentValue, written: parameter.value })
-      expressions.set(parameter.parameterId, parameter.value)
+      const previousWrite = expressionWrites.get(parameter.parameterId)
+      if (previousWrite && entry.currentValue !== previousWrite.written) {
+        // An operator changed this parameter during the transition. Keep their value.
+        expressionWrites.delete(parameter.parameterId)
+        expressionBlocked.add(parameter.parameterId)
+        continue
+      }
+      const previous = previousWrite?.previous ?? entry.currentValue
+      const written = previous + (parameter.value - previous) * strength
+      expressionWrites.set(parameter.parameterId, { previous, written })
+      expressions.set(parameter.parameterId, written)
     }
   }
 
@@ -105,7 +122,11 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
     const ready = !modelImporting && settings.stageModelRenderer === 'live2d'
       && (modelReady ? modelReady() : startup.resources.some(resource => resource.id === 'model' && resource.status === 'ready'))
     const name = command.expiresAt > now ? command.name : 'idle'
-    if (!ready || name === 'idle') {
+    const sample = name === 'sequence' && command.motion && command.startedAt !== null && command.startedAt !== undefined
+      ? sampleMotionSequence(command.motion, now - command.startedAt)
+      : undefined
+    const waiting = command.startedAt === null
+    if (!ready || name === 'idle' || waiting || sample?.finished) {
       release()
     }
     else {
@@ -113,7 +134,7 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
         motion.claimExclusiveControl(owner)
         owned = true
       }
-      applyExpression(name)
+      applyExpression(sample?.expression?.name ?? (sample ? 'idle' : name), sample?.expression?.strength ?? 1)
       const pose = { ...neutralLive2DMotionControlPose }
       const wave = Math.sin(now / 230)
       if (name === 'listen') {
@@ -146,9 +167,11 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
         pose.eyeX = 0.25
         pose.headZ = -0.2
       }
+      if (sample)
+        Object.assign(pose, sample.pose)
       motion.setPose(owner, pose, { follow: 0.85, inertia: 0.25 })
     }
-    const receipt = { ready, name, expression: nativeExpression, session: command.session, id: command.id }
+    const receipt = { ready, name, expression: nativeExpression, session: command.session, id: command.id, label: command.motion?.label, step: sample?.step, waiting }
     void runtime?.context.emit(receiptEvent, receipt)
     external?.emit(receipt)
   }
@@ -160,7 +183,7 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
     const incoming = parsed.output
     if (incoming.session === command?.session && incoming.id < command.id)
       return
-    if (incoming.expiresAt > Date.now() + 5000)
+    if (incoming.expiresAt > Date.now() + 5000 || (incoming.startedAt !== undefined && incoming.startedAt !== null && incoming.startedAt > Date.now() + 500))
       return
     command = incoming
     receivedAt = Date.now()
