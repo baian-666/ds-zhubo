@@ -66,3 +66,19 @@ test('server exposes pose intent, strips markers from history and clears after i
  await post('reply',{source:'host',text:'再说一次'}).then(r=>r.text());assert.equal(prompts[1][1].content,'才不是！')
  assert.equal((await post('performance',{name:'script'})).status,400)
 })
+
+test('waiting and generating do not invent confusion, while explicit expressions remain available',()=>{
+ let now=0;const p=new Performance({now:()=>now})
+ for(const state of [{busy:true},{thinking:true},{busy:true,thinking:true},{hostSpeaking:true},{hostSpeaking:true,thinking:true}]){
+  assert.equal(p.snapshot(state).name,state.hostSpeaking||state.thinking?'listen':'idle')
+  assert.equal(p.snapshot(state).source,'state')
+ }
+ p.play('smile',{durationMs:1000})
+ assert.equal(p.snapshot({thinking:true}).name,'smile')
+ now=1001;assert.equal(p.snapshot({thinking:true}).name,'listen')
+ p.play('think',{source:'model'})
+ assert.equal(p.snapshot({busy:true}).name,'think')
+ p.clear();p.play('think',{source:'preview'})
+ assert.equal(p.snapshot().name,'think')
+ assert.equal(p.snapshot({muted:true,thinking:true}).name,'idle')
+})

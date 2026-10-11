@@ -57,10 +57,10 @@ export class Performance {
   }
   clear() { this.current = null; this.sequence++ }
   cancel(turn) { if(this.current?.turn===turn)this.clear() }
-  snapshot({muted,hostSpeaking,busy,thinking=false}={}) {
+  snapshot({muted,hostSpeaking,thinking=false}={}) {
     if(this.current?.expiresAt<=this.now())this.clear()
     const current=muted ? null : this.current
     if(current)return {...current,expiresAt:Math.min(current.expiresAt,this.now()+1200)}
-    return {id:this.sequence,name:muted?'idle':hostSpeaking?'listen':busy||thinking?'think':'idle',turn:null,source:'state',expiresAt:this.now()+1200}
+    return {id:this.sequence,name:muted?'idle':hostSpeaking||thinking?'listen':'idle',turn:null,source:'state',expiresAt:this.now()+1200}
   }
 }

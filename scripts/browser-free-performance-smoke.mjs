@@ -11,11 +11,11 @@ const fixture={label:'侧目再轻笑',frames:[
  {ms:1200,pose:{eyeX:0.4,headZ:0.3,bodyZ:0.15,mouthForm:0.5},expression:{name:'pout',strength:0.6}},
  {ms:800,pose:{eyeX:0,headZ:0,bodyZ:0,mouthForm:0.1},expression:{name:'smile',strength:0.5}},
 ]}
-let modelCalls=0,modelOutput=""
+let modelCalls=0,modelOutput="",resumeFixture
 const server=createApp({apiKey:real?process.env.DEEPSEEK_API_KEY:'test-only',token:'',reply:async function*(options){
  modelCalls++
  if(real){for await(const chunk of streamReply(options)){modelOutput+=chunk;yield chunk}return}
- yield '我才没有摸鱼呢。';yield '<act:'+JSON.stringify(fixture)+'>';yield '这是战略思考。'
+ yield '我才没有摸鱼呢。';await new Promise(resolve=>resumeFixture=resolve);yield '<act:'+JSON.stringify(fixture)+'>';yield '这是战略思考。'
 }})
 server.listen(0,'127.0.0.1');await once(server,'listening')
 const base='http://127.0.0.1:'+server.address().port
@@ -39,13 +39,24 @@ try {
    let scene=el.__vueParentComponent;while(scene&&scene.type.__name!=='Live2D')scene=scene.parent
    const core=scene.devtoolsRawSetupState.live2dModelRef.value.$.devtoolsRawSetupState.model.value.internalModel.coreModel
    return {at:Date.now(),active:motion.control.active,pose:JSON.parse(JSON.stringify(motion.control.pose)),
-    happy:expressions.expressions.get('ParamCheek76').currentValue,angry:expressions.expressions.get('ParamCheek80').currentValue,
+    question:core.getParameterValueById('ParamCheek74'),happy:expressions.expressions.get('ParamCheek76').currentValue,angry:expressions.expressions.get('ParamCheek80').currentValue,
     core:{eyeX:core.getParameterValueById('ParamEyeBallX'),headZ:core.getParameterValueById('ParamAngleZ'),mouth:core.getParameterValueById('ParamMouthOpenY')}}
   })
  }
  const request=post('reply',{source:'host',text:'小鲸鱼，你是不是又在摸鱼，被我抓到了吧！你一边解释一边自己安排几个连贯的小动作给我看看。'})
+ if(!real){
+  const deadline=Date.now()+5000
+  while(!resumeFixture&&Date.now()<deadline)await page.waitForTimeout(20)
+  assert.ok(resumeFixture)
+  await page.waitForTimeout(650)
+  result.waiting=await state()
+  assert.equal((await status()).busy,true)
+  assert.equal(result.waiting.question,0)
+  assert.equal(result.waiting.active,false)
+  resumeFixture()
+ }
  await frame.waitForFunction(()=>document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('live2d-motion-control').control.active,null,{timeout:30000})
- // The generic thinking pose can precede the plan. Wait for the actual sequence receipt.
+ // Wait for the actual sequence receipt rather than inferring it from a state pose.
  await page.locator('#performanceState').filter({hasText:'第 '}).waitFor({timeout:30000})
  result.motion=(await status()).performance.motion
  assert.ok(result.motion)
