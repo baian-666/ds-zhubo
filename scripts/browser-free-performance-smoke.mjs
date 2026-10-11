@@ -60,6 +60,13 @@ try {
  await post('interrupt',{})
  await page.waitForTimeout(650)
  assert.equal((await state()).active,false)
+ // A short transition must reach its target and keep the last expression visible.
+ await post('performance',{name:'sequence',motion:{label:'停留可读性',frames:[{ms:300,holdMs:1400,pose:{headZ:0.2},expression:{name:'smile',strength:0.7}}]}})
+ await frame.waitForFunction(()=>document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('live2d-expressions').expressions.get('ParamCheek76').currentValue===0.7)
+ result.holdSamples=[await state()]
+ await page.waitForTimeout(500);result.holdSamples.push(await state())
+ assert.equal(result.holdSamples[1].happy,0.7);assert.equal(result.holdSamples[1].active,true)
+ await page.waitForTimeout(1700);assert.equal((await state()).active,false);assert.equal((await state()).happy,0)
  // An operator edit during continuous expression updates must survive subsequent ticks and release.
  await post('performance',{name:'sequence',motion:{label:'人工接管检查',frames:[{ms:1800,pose:{eyeX:0.3},expression:{name:'smile',strength:0.8}},{ms:1800,pose:{eyeX:0.3}}]}})
  await frame.waitForFunction(()=>document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('live2d-expressions').expressions.get('ParamCheek76').currentValue>0.05)

@@ -16,9 +16,11 @@ export type PoseAxis = keyof typeof poseLimits
 export type SequencePose = Partial<Record<PoseAxis, number>>
 export type ExpressionName = 'smile' | 'think' | 'surprise' | 'pout'
 export interface SequenceExpression { name: ExpressionName, strength: number }
-export interface MotionFrame { ms: number, pose: SequencePose, expression?: SequenceExpression }
-/** A short, transient performance. Frame durations include the transition to their target. */
+export interface MotionFrame { ms: number, holdMs?: number, pose: SequencePose, expression?: SequenceExpression }
+/** A short, transient performance. Each frame has a transition and a separate hold. */
 export interface MotionSequence { label: string, frames: MotionFrame[] }
+
+export const defaultHoldMs = 800
 
 const expressionNames = ['smile', 'think', 'surprise', 'pout']
 const axes = Object.keys(poseLimits) as PoseAxis[]
@@ -44,11 +46,14 @@ export function parseMotionSequence(value: unknown): MotionSequence | null {
   }
   const frames: MotionFrame[] = []
   let duration = 0
+  let transitions = 0
   for (const frame of value.frames) {
-    if (!object(frame) || Object.keys(frame).some(key => !['ms', 'pose', 'expression'].includes(key))
+    if (!object(frame) || Object.keys(frame).some(key => !['ms', 'holdMs', 'pose', 'expression'].includes(key))
       || !within(frame.ms, 200, 1800) || !Number.isInteger(frame.ms) || !object(frame.pose)) {
       return null
     }
+    if (frame.holdMs !== undefined && (!within(frame.holdMs, 0, 1800) || !Number.isInteger(frame.holdMs)))
+      return null
     const pose: SequencePose = {}
     for (const [key, amount] of Object.entries(frame.pose)) {
       if (!Object.hasOwn(poseLimits, key))
@@ -68,17 +73,18 @@ export function parseMotionSequence(value: unknown): MotionSequence | null {
       }
       expression = { name: candidate.name as ExpressionName, strength: candidate.strength }
     }
-    duration += frame.ms
-    if (duration > 4000)
+    transitions += frame.ms
+    duration += frame.ms + (frame.holdMs as number | undefined ?? defaultHoldMs)
+    if (transitions > 4000 || duration > 10000)
       return null
-    frames.push({ ms: frame.ms, pose, ...(expression ? { expression } : {}) })
+    frames.push({ ms: frame.ms, ...(frame.holdMs !== undefined ? { holdMs: frame.holdMs as number } : {}), pose, ...(expression ? { expression } : {}) })
   }
   return { label: value.label.trim(), frames }
 }
 
 /** Measures a validated sequence, excluding the renderer's final release. */
 export function sequenceDuration(sequence: MotionSequence): number {
-  return sequence.frames.reduce((total, frame) => total + frame.ms, 0)
+  return sequence.frames.reduce((total, frame) => total + frame.ms + (frame.holdMs ?? defaultHoldMs), 0)
 }
 
 /**
@@ -95,8 +101,9 @@ export function sampleMotionSequence(sequence: MotionSequence, elapsedMs: number
   for (const [step, frame] of sequence.frames.entries()) {
     const target = { ...previous, ...frame.pose }
     const nextExpression = frame.expression ?? expression
-    if (elapsed < frame.ms) {
-      const progress = elapsed / frame.ms
+    const frameDuration = frame.ms + (frame.holdMs ?? defaultHoldMs)
+    if (elapsed < frameDuration) {
+      const progress = Math.min(1, elapsed / frame.ms)
       const ease = progress * progress * (3 - 2 * progress)
       const pose: SequencePose = {}
       for (const axis of axes)
@@ -115,7 +122,7 @@ export function sampleMotionSequence(sequence: MotionSequence, elapsedMs: number
       }
       return { pose, expression: sampledExpression, step: step + 1, finished: false }
     }
-    elapsed -= frame.ms
+    elapsed -= frameDuration
     previous = target
     expression = nextExpression
   }
@@ -134,7 +141,8 @@ export const motionSequenceSchema = {
       items: {
         type: 'object',
         properties: {
-          ms: { type: 'integer', minimum: 200, maximum: 1800 },
+          ms: { type: 'integer', minimum: 200, maximum: 1800, description: '过渡到目标所需毫秒' },
+          holdMs: { type: 'integer', minimum: 0, maximum: 1800, description: '到位后停留毫秒，省略默认800，常用800–1400' },
           pose: {
             type: 'object',
             properties: Object.fromEntries(axes.map(axis => [axis, { type: 'number', minimum: poseLimits[axis][0], maximum: poseLimits[axis][1] }])),

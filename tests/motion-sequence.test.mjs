@@ -29,12 +29,12 @@ test('sequence boundary rejects arbitrary controls, impossible values and long p
  assert.equal(motion.frames[0].pose.eyeX,-0.6)
 })
 test('sampling preserves phase, smooths targets and fades between expression owners',()=>{
- assert.equal(sequenceDuration(motion),1800)
+ assert.equal(sequenceDuration(motion),3400)
  assert.equal(sampleMotionSequence(motion,400).pose.eyeX,-0.3)
- const middle=sampleMotionSequence(motion,1300)
+ const middle=sampleMotionSequence(motion,2100)
  assert.equal(middle.step,2);assert.equal(middle.expression.strength,0)
  assert.ok(Math.abs(middle.pose.eyeX+0.1)<1e-9)
- assert.equal(sampleMotionSequence(motion,1800).finished,true)
+ assert.equal(sampleMotionSequence(motion,3400).finished,true)
 })
 test('control markers across every stream split never enter speech; text before a plan is immediate',async()=>{
  const marker='<act:'+JSON.stringify(motion)+'>'
@@ -108,4 +108,26 @@ test('model closing-tag variants stay out of speech across every split',async()=
    assert.deepEqual(actions,[['sequence',motion]])
   }
  }
+})
+
+test('target expression stays visible for its hold, including the last frame',()=>{
+ const short={label:'看清笑容',frames:[{ms:300,pose:{headZ:0.2},expression:{name:'smile',strength:0.7}}]}
+ assert.equal(sequenceDuration(short),1100)
+ for(const at of [300,600,1099]){
+  const sample=sampleMotionSequence(short,at)
+  assert.equal(sample.finished,false);assert.equal(sample.expression.strength,0.7);assert.equal(sample.pose.headZ,0.2)
+ }
+ assert.equal(sampleMotionSequence(short,1100).finished,true)
+ const explicit={...short,frames:[{...short.frames[0],holdMs:1400}]}
+ assert.equal(sequenceDuration(parseMotionSequence(explicit)),1700)
+ assert.equal(sampleMotionSequence(explicit,1699).expression.strength,0.7)
+ assert.equal(sequenceDuration({...short,frames:[{...short.frames[0],holdMs:0}]}),300)
+ for(const holdMs of [-1,1801,NaN,1.5,'800'])assert.equal(parseMotionSequence({...short,frames:[{...short.frames[0],holdMs}]}),null)
+ assert.equal(parseMotionSequence({...short,frames:Array(4).fill({...short.frames[0],ms:1000,holdMs:1800})}),null)
+ let now=0;const p=new Performance({now:()=>now})
+ const long={label:'慢些反应',frames:Array(4).fill({...short.frames[0],ms:1000,holdMs:1000})}
+ assert.equal(p.play('sequence',{motion:long,turn:1}),true)
+ const id=p.snapshot().id
+ for(now=0;now<8000;now+=1000){assert.equal(p.snapshot().id,id);assert.ok(p.snapshot().expiresAt<=now+1200)}
+ now=8251;assert.equal(p.snapshot().name,'idle')
 })

@@ -60,7 +60,7 @@ export class Performance {
   snapshot({muted,hostSpeaking,busy,thinking=false}={}) {
     if(this.current?.expiresAt<=this.now())this.clear()
     const current=muted ? null : this.current
-    if(current)return {...current,expiresAt:current.startedAt===null ? this.now()+1200 : current.expiresAt}
+    if(current)return {...current,expiresAt:Math.min(current.expiresAt,this.now()+1200)}
     return {id:this.sequence,name:muted?'idle':hostSpeaking?'listen':busy||thinking?'think':'idle',turn:null,source:'state',expiresAt:this.now()+1200}
   }
 }
