@@ -18,6 +18,7 @@
     "dev:desktop": "node scripts/desktop.mjs dev",
     "check:desktop": "node scripts/desktop.mjs check",
     "build:desktop": "node scripts/desktop.mjs build",
-    "test:voice:native": "node scripts/voice-native-smoke.mjs"
+    "test:voice:native": "node scripts/voice-native-smoke.mjs",
+    "configure:voice": "node scripts/configure-voice.mjs"
   }
 }

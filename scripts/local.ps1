@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('check','test','dev','setup:airi:web','dev:airi','replay:director','setup:desktop','dev:desktop','check:desktop','build:desktop')]
+  [ValidateSet('check','test','dev','setup:airi:web','dev:airi','replay:director','setup:desktop','dev:desktop','check:desktop','build:desktop','configure:voice')]
   [string]$Action = 'dev'
 )
 $ErrorActionPreference = 'Stop'
