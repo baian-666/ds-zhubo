@@ -98,7 +98,11 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
         continue
       }
       const previous = previousWrite?.previous ?? entry.currentValue
-      const written = previous + (parameter.value - previous) * strength
+      let written = previous + (parameter.value - previous) * strength
+      // This rig replaces the normal eyes. Fractional values show both eye drawings.
+      // Keep this switch discrete while brows and poses retain their requested strength.
+      if (name === 'smile' && parameter.parameterId === 'ParamCheek76')
+        written = strength > 0 ? parameter.value : previous
       expressionWrites.set(parameter.parameterId, { previous, written })
       expressions.set(parameter.parameterId, written)
     }

@@ -42,12 +42,14 @@ try {
     let el=document.querySelector('canvas');while(el&&!el.__vueParentComponent)el=el.parentElement
     let c=el.__vueParentComponent;while(c&&c.type.__name!=='Live2D')c=c.parent
     const core=c.devtoolsRawSetupState.live2dModelRef.value.$.devtoolsRawSetupState.model.value.internalModel.coreModel
-    return {active:control.active,eyeX:core.getParameterValueById('ParamEyeBallX'),headZ:core.getParameterValueById('ParamAngleZ'),happy:core.getParameterValueById('ParamCheek76')}
+    return {active:control.active,eyeX:core.getParameterValueById('ParamEyeBallX'),headZ:core.getParameterValueById('ParamAngleZ'),happy:core.getParameterValueById('ParamCheek76'),brow:core.getParameterValueById('ParamBrowLY')}
    }))
    if(i===3)await stage.screenshot({path:'data/free-motion-desktop.png'})
    await stage.waitForTimeout(180)
   }
-  assert.ok(samples.some(x=>x.happy>0&&x.happy<0.7))
+  assert.ok(samples.some(x=>x.happy===1))
+  assert.ok(samples.every(x=>x.happy===0||x.happy===1))
+  assert.ok(samples.some(x=>x.brow<0&&x.brow>-0.56))
   assert.ok(Math.max(...samples.map(x=>x.headZ))-Math.min(...samples.map(x=>x.headZ))>0.1)
   await api('idle')
   await stage.waitForFunction(()=>!document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('live2d-motion-control').control.active)
