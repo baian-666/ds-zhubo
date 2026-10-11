@@ -1,4 +1,4 @@
-import type { Command } from './cohost-contract'
+import type { Command, Receipt } from './cohost-contract'
 
 import { createContext } from '@moeru/eventa/adapters/window-message'
 import { neutralLive2DMotionControlPose, useLive2DMotionControl } from '@proj-airi/stage-ui-live2d/stores'
@@ -15,12 +15,13 @@ import { channel, commandEvent, commandSchema, receiptEvent } from './cohost-con
  * Commands use a session and sequence. A 1500 ms lease releases control after the parent disconnects.
  * Unmount releases ownership before it disposes the transport. Saved model settings stay unchanged.
  */
-export function useCohostPerformance() {
+export function useCohostPerformance(connect?: (receive: (body: unknown) => void) => { emit: (receipt: Receipt) => void, dispose: () => void }, modelReady?: () => boolean) {
   const motion = useLive2DMotionControl()
   const settings = useSettingsStageModel()
   const startup = useStartupResourcesStore()
   const owner = 'ds-zhubo:performance'
   let runtime: ReturnType<typeof createContext> | undefined
+  let external: { emit: (receipt: Receipt) => void, dispose: () => void } | undefined
   let timer: ReturnType<typeof setInterval> | undefined
   let command: Command | undefined
   let receivedAt = 0
@@ -41,7 +42,7 @@ export function useCohostPerformance() {
       return
     }
     const ready = settings.stageModelRenderer === 'live2d'
-      && startup.resources.some(resource => resource.id === 'model' && resource.status === 'ready')
+      && (modelReady ? modelReady() : startup.resources.some(resource => resource.id === 'model' && resource.status === 'ready'))
     const name = command.expiresAt > now ? command.name : 'idle'
     if (!ready || name === 'idle') {
       release()
@@ -84,32 +85,42 @@ export function useCohostPerformance() {
       }
       motion.setPose(owner, pose, { follow: 0.85, inertia: 0.25 })
     }
-    void runtime?.context.emit(receiptEvent, { ready, name, session: command.session, id: command.id })
+    const receipt = { ready, name, session: command.session, id: command.id }
+    void runtime?.context.emit(receiptEvent, receipt)
+    external?.emit(receipt)
+  }
+
+  function receive(body: unknown) {
+    const parsed = v.safeParse(commandSchema, body)
+    if (!parsed.success)
+      return
+    const incoming = parsed.output
+    if (incoming.session === command?.session && incoming.id < command.id)
+      return
+    if (incoming.expiresAt > Date.now() + 5000)
+      return
+    command = incoming
+    receivedAt = Date.now()
+    tick()
   }
 
   onMounted(() => {
+    if (connect) {
+      external = connect(receive)
+      timer = setInterval(tick, 100)
+      return
+    }
     const parentOrigin = new URLSearchParams(location.search).get('cohostOrigin')
     if (window.parent === window || !parentOrigin || !/^http:\/\/127\.0\.0\.1:\d+$/.test(parentOrigin))
       return
     runtime = createContext({ channel, currentWindow: window, targetWindow: () => window.parent, expectedSource: () => window.parent, expectedOrigin: parentOrigin, targetOrigin: parentOrigin })
-    runtime.context.on(commandEvent, ({ body }) => {
-      const parsed = v.safeParse(commandSchema, body)
-      if (!parsed.success)
-        return
-      const incoming = parsed.output
-      if (incoming.session === command?.session && incoming.id < command.id)
-        return
-      if (incoming.expiresAt > Date.now() + 5000)
-        return
-      command = incoming
-      receivedAt = Date.now()
-      tick()
-    })
+    runtime.context.on(commandEvent, ({ body }) => receive(body))
     timer = setInterval(tick, 100)
   })
   onUnmounted(() => {
     clearInterval(timer)
     release()
     runtime?.dispose()
+    external?.dispose()
   })
 }

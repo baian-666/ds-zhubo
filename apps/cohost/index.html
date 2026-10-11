@@ -14,7 +14,7 @@ label{display:block;margin:9px 0}input,textarea,select{background:#0e1823;border
 .rehearsalHint{margin:0 0 5px;font-size:13px;color:#c5d5df}#rehearsalState{display:block;color:#82ddc6;margin-bottom:14px}.primarySend{width:100%;margin:8px 0}.rehearsalActions{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid #2d3d4f;margin-top:18px;padding-top:14px}.rehearsalActions small{font-size:11px}.advancedControls{border-top:1px solid #2d3d4f;padding-top:14px;margin-top:24px}.advancedControls>summary{margin-bottom:14px}.composer textarea{min-height:140px}.visuallyHidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 </style></head>
 <body>
-<header><div><div class="tag">LOCAL REHEARSAL · 文字排练</div><h1>小鲸鱼 · 虚拟直播间</h1></div><div id="status" class="status" role="status">连接本机服务…</div></header>
+<header><div><div class="tag">LOCAL REHEARSAL · 本机试播</div><h1>小鲸鱼 · 虚拟直播间</h1></div><div id="status" class="status" role="status">连接本机服务…</div></header>
 <main>
 <section id="stagePanel" class="panel stagePanel">
 <div class="panelTitle stageTitle"><h2>AIRI 网页舞台 <small id="stageState">等待启动</small></h2><button id="expandStage" class="secondary" aria-expanded="false" aria-controls="stagePanel">放大舞台</button></div>
@@ -24,7 +24,7 @@ label{display:block;margin:9px 0}input,textarea,select{background:#0e1823;border
 <div class="stageFooter"><button id="reloadStage" class="secondary">重新连接</button><a href="http://127.0.0.1:5173" target="_blank" rel="noreferrer">单独打开 AIRI</a></div>
 <div id="performanceControls" class="stageFooter" aria-label="角色试演"><button data-pose="nod">点头</button><button data-pose="smile">轻笑</button><button data-pose="surprise">惊讶</button><button data-pose="pout">嘴硬</button><button data-pose="think">思考</button><button data-pose="idle">恢复</button></div>
 <small id="performanceState" role="status">等待表演桥接…</small><br>
-<small>小鲸鱼人格 · 当前 AIRI 形象。文字与姿态联动；语音、口型与真实平台弹幕待接入。</small>
+<small>小鲸鱼人格 · 当前 AIRI 形象。文字与姿态联动；可开启系统语音试播，角色口型与真实平台弹幕待接入。</small>
 </section>
 <section class="panel chatPanel">
 <div class="panelTitle"><h2>直播间聊天</h2><small>按时间排列</small></div>
@@ -35,9 +35,19 @@ label{display:block;margin:9px 0}input,textarea,select{background:#0e1823;border
 <div class="chatToolbar"><label><input id="showProcess" type="checkbox"> 显示过程事件</label><button id="latest" class="secondary">回到最新 ↓</button></div>
 <details class="timeline"><summary>请求与耗时记录</summary><ol id="timeline"></ol></details>
 </section>
-<section class="panel inputPanel"><div class="panelTitle"><h2>直播模拟台</h2><small>文字排练</small></div><div class="scrollControls">
-<p class="rehearsalHint">扮演主播或观众发一句，看看小鲸鱼怎么接。</p><small id="rehearsalState" role="status">正在连接…</small>
+<section class="panel inputPanel"><div class="panelTitle"><h2>直播模拟台</h2><small>语音 / 文字</small></div><div class="scrollControls">
+<p class="rehearsalHint">直接开口试播，或用文字模拟主播和观众。</p><small id="rehearsalState" role="status">正在连接…</small>
 <div class="speakerTabs" role="tablist" aria-label="选择模拟发言者"><button id="hostTab" role="tab" aria-selected="true" aria-controls="hostComposer">主播说话</button><button id="viewerTab" role="tab" aria-selected="false" aria-controls="viewerComposer">观众弹幕</button></div>
+<div class="rehearsalActions"><button id="interrupt" class="stop">让小鲸鱼停一下</button><small>随时打断当前回答</small></div>
+<div class="composer" id="voicePanel">
+<strong>真实语音试播</strong>
+<div><button id="voiceStart">开始收音</button><button id="voiceStop" class="secondary" disabled>停止收音</button></div>
+<label><input id="voiceOutput" type="checkbox" checked> 小鲸鱼用系统声音回答</label>
+<small>使用 Windows 默认麦克风；朗读时请戴耳机，避免把外放声音当成主播。系统声音暂不带角色口型。</small>
+<div id="voiceState" role="status">正在读取语音状态…</div>
+<meter id="voiceLevel" min="0" max="100" value="0" aria-label="麦克风音量"></meter>
+<p id="voiceTranscript" aria-live="polite">你的话会自动进入中间聊天。</p><button id="voiceConfirm" class="secondary" hidden>检查这句识别文字</button>
+</div>
 <div id="hostComposer" class="composer" role="tabpanel" aria-labelledby="hostTab">
 <label>找句话试试<select id="scenario"><option value="handover">问问小鲸鱼的想法</option><option value="setup">讲故事：我的猫叫年糕</option><option value="natural">接着聊：跑步机变晾衣机</option><option value="pause">话说一半，想一想</option><option value="backchannel">附和一句：嗯，对</option><option value="stop">打断一句：等一下</option><option value="opportunity">聊到一个有意思的话题</option><option value="recall">问问刚才的猫叫什么</option></select></label>
 <label for="hostText" class="visuallyHidden">主播说的话</label><textarea id="hostText" maxlength="2000" placeholder="输入主播正在说的话…">小鲸鱼，你怎么看虚拟角色陪伴这件事？</textarea>
@@ -51,7 +61,7 @@ label{display:block;margin:9px 0}input,textarea,select{background:#0e1823;border
 <label><input id="simulate" type="checkbox"> 自动来点弹幕 · 每 5 秒一条</label>
 <label><input id="viewerWindow" type="checkbox"> 允许小鲸鱼回复弹幕</label>
 </div>
-<div class="rehearsalActions"><button id="interrupt" class="stop">让小鲸鱼停一下</button><small>Ctrl / ⌘ + Enter 发送</small></div>
+
 <strong id="testFeedback" role="status">发言和小鲸鱼的回应会出现在中间聊天里。</strong>
 <details id="advancedControls" class="advancedControls"><summary>更多设置</summary>
 <div class="controls"><label>导演<select id="mode"><option value="auto">自动导演</option><option value="manual">人工导演</option></select></label><label>回复来源<select id="engine"><option value="deepseek">DeepSeek · 真实 API</option><option value="mock">模拟回复 · 不调用 API</option></select></label></div>

@@ -17,7 +17,7 @@ for(const name of ['cohost-contract.ts','cohost-parent.ts','use-cohost-performan
   // Owned overlay files can be updated only when they match the previous installation.
   const saved=join(root,'data/airi-overlay',name)
   if(existsSync(path) && !readFileSync(path).equals(source) && (!existsSync(saved)||!readFileSync(path).equals(readFileSync(saved))))throw new Error('AIRI overlay has unsaved edits: '+name)
-  writeFileSync(path,source)
+  if(!existsSync(path) || !readFileSync(path).equals(source)) writeFileSync(path,source)
   mkdirSync(join(root,'data/airi-overlay'),{recursive:true});writeFileSync(saved,source)
 }
 const app=join(vendor,'apps/stage-web/src/App.vue')

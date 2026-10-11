@@ -1,18 +1,18 @@
 # 转为本地主力开发
 
-更新：2026-10-10。用户选择在当前 Windows 主力电脑本地开发。云端任务与 GitHub 保留项目记录，模型仍通过 DeepSeek API 使用；本地开发并不要求本机运行大模型。
+更新：2026-10-11。用户选择在当前 Windows 主力电脑本地开发。云端任务与 GitHub 保留项目记录，模型仍通过 DeepSeek API 使用；本地开发并不要求本机运行大模型。
 
 ## 当前 Windows 接续入口
 
 本轮已在 D:\ds-zhubo 安装固定版本工具链并启动 cohost。使用 scripts/setup-local.ps1 与 scripts/local.ps1，不需替换系统 Node。当前已实现 Windows 的 setup:airi:web 与 dev:airi；下方旧迁移记录中的“封装脚本拒绝 Windows”已被此实现替代。
 
-网页版优先，Electron 桌面端后置。完整启动与人工/自动导演操作见 [文字虚拟直播间](TEXT-ROOM.md)。工具链、AIRI Web 实际验收结果以 STATUS 最新记录为准。
+网页版与 Electron 桌面开发版均已接入同一场次，新增 Windows 本机语音试播。当前入口见 [桌面与语音试播](DESKTOP-VOICE.md)，文字操作见 [文字虚拟直播间](TEXT-ROOM.md)。实际验收以 STATUS 最新记录为准。下方旧迁移步骤保留历史背景。
 
 ## 已完成与尚未完成
 
 - 旧云端代码、导演协议、模拟测试、AIRI 安装诊断都已本地提交保存。
 - 本地任务必须核对是否包含 `apps/cohost/director.mjs`、`docs/TURN-DIRECTOR.md`、`docs/AIRI-SETUP.md`；旧远端 main 可能没有这些未推送改动。
-- 旧云端终端是 Linux `/workspace/ds-zhubo`，不是用户 Windows 电脑；没有本机终端连接，尚未在用户设备安装工具链、下载源码或启动服务。
+- 旧云端终端是 Linux `/workspace/ds-zhubo`；当前 Windows 工作区为 `D:\ds-zhubo`，固定工具链和 AIRI 已本机安装。
 - 云端 secrets 不会随 Git 或备份迁移。本地配置用忽略的 `.env`，密钥不发到聊天，不打印、不提交。
 
 ## 一次性接续
@@ -40,13 +40,13 @@ npm run dev
 
 文字联调入口为本机 `http://127.0.0.1:8787`。浏览器测试须在服务确实启动后进行。根项目仅用 Node 内置模块，不需为了启动 cohost 额外安装依赖。
 
-用本机编辑器配置 `.env`，保留 `HOST=127.0.0.1`、`PORT=8787`，填入 `DEEPSEEK_API_KEY`；模型先沿用已实测的 `deepseek-flash`，仍需在新设备实际检查可用性。`.env.example` 可作为模板。不能覆盖已有 `.env`，不复制云端密钥占位符。AIRI 与 cohost 的调用桥接仍待实现，不应为了配置方便把服务端密钥写进客户端源码。
+用本机编辑器配置 `.env`，保留 `HOST=127.0.0.1`、`PORT=8787`，填入 `DEEPSEEK_API_KEY`；模型先沿用已实测的 `deepseek-flash`，仍需在新设备实际检查可用性。`.env.example` 可作为模板。不能覆盖已有 `.env`，不复制云端密钥占位符。AIRI 与 cohost 已有可重放的表演桥接，服务端密钥不得写进客户端源码。
 
 ## AIRI 安装
 
 固定提交和依赖版本继续使用 `airi.lock.json`。先读上游 AGENTS，再安装；已有 `vendor/airi` 时检查 origin、HEAD 和修改，不覆盖已有工作。
 
-此前 `scripts/airi.mjs` 拒绝 Windows。本轮已实现并实际执行 `setup:airi:web` 的 Windows Web 安装与构建，原始全量桌面安装不在本轮验收范围。本阶段可按下面的上游 Web 命令执行；源码获取必须沿用固定仓库/提交和工作区保护检查。后续若改跨平台脚本，需要实际 Windows 验证。
+此前 `scripts/airi.mjs` 拒绝 Windows。本轮已实现并实际执行 `setup:airi:web` 的 Windows Web 安装与构建，桌面现另有 setup:desktop / dev:desktop 入口，见 DESKTOP-VOICE.md；不等于所有原生依赖或安装包已验收。本阶段可按下面的上游 Web 命令执行；源码获取必须沿用固定仓库/提交和工作区保护检查。后续若改跨平台脚本，需要实际 Windows 验证。
 
 ```powershell
 # 先获取并核验 airi.lock.json 指定的仓库和提交到 vendor/airi

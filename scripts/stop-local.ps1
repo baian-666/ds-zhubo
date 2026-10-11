@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 $taskNode = Join-Path $taskRoot 'data/toolchains/node-v26.7.0-win-x64/node.exe'
-foreach ($taskService in @(@{Name='cohost';Entry='apps/cohost/server.mjs'},@{Name='airi';Entry='scripts/airi.mjs'})) {
+foreach ($taskService in @(@{Name='cohost';Entry='apps/cohost/server.mjs'},@{Name='airi';Entry='scripts/airi.mjs'},@{Name='desktop-launcher';Entry='scripts/desktop.mjs'})) {
   $taskPidFile = Join-Path $taskRoot ('data/' + $taskService.Name + '.pid')
   if (!(Test-Path -LiteralPath $taskPidFile)) { continue }
   $taskPid = [int](Get-Content -LiteralPath $taskPidFile)

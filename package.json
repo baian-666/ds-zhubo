@@ -13,6 +13,11 @@
     "replay:director": "node scripts/replay-director.mjs",
     "setup:airi": "node scripts/airi.mjs setup",
     "dev:airi": "node scripts/airi.mjs dev",
-    "setup:airi:web": "node scripts/airi.mjs setup-web"
+    "setup:airi:web": "node scripts/airi.mjs setup-web",
+    "setup:desktop": "node scripts/desktop.mjs setup",
+    "dev:desktop": "node scripts/desktop.mjs dev",
+    "check:desktop": "node scripts/desktop.mjs check",
+    "build:desktop": "node scripts/desktop.mjs build",
+    "test:voice:native": "node scripts/voice-native-smoke.mjs"
   }
 }

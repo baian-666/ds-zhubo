@@ -1,5 +1,7 @@
 import { connectStage } from './stage-bridge.mjs'
 const $ = id => document.getElementById(id)
+const voiceOwner = crypto.randomUUID()
+let voiceLeaseAt = 0
 const poseNames={idle:'待机',listen:'倾听',think:'思考',nod:'点头',smile:'轻笑',surprise:'惊讶',pout:'嘴硬'}
 let stageSeen=0
 const stageBridge=connectStage($('stage'), status=>{
@@ -15,6 +17,7 @@ if (['deepseek','mock'].includes(savedEngine)) $('engine').value = savedEngine
 let state, utterance, activeRequest = null, activeTurn = null, refreshing = false, submitting = false
 let seenTrace = 0, attemptedDecision = 0, simulatedNumber = 0, blockedDecision = 0
 const reasons = {
+  voice_stopped:'收音已停止，释放主播讲话状态',
   participation_reaction:'我先用文字或表情回应，不抢话',
   participation_changed: '自主参与设置改变，旧决定作废', scene_changed: '现场有新消息，重新判断',
   mode_changed: '导演模式改变，旧机会作废', host_voice_detected: '听到主播活动，先观察，不直接打断',
@@ -69,6 +72,11 @@ async function refresh() {
   refreshing = true
   try {
     state = await data(await api('status'))
+    renderVoice(state.voice)
+    if (state.voice?.active && state.voice.owner === voiceOwner && Date.now() - voiceLeaseAt > 1800) {
+      voiceLeaseAt = Date.now()
+      await api('voice/heartbeat', {owner:voiceOwner})
+    }
     $('rehearsalState').textContent=state.muted ? '小鲸鱼已暂停回应' : $('engine').value==='mock' ? '模拟回复 · 不调用模型' : !state.deepseekConfigured ? 'DeepSeek 未配置 · 请先配置本机密钥' : state.director.mode==='auto' ? '真实 DeepSeek · 小鲸鱼自动决定何时参与' : '人工接话 · 在更多设置里让小鲸鱼回答'
     $('initiative').checked = Boolean(state.participation?.enabled)
     $('initiative').disabled = !state.participation?.configured || $('engine').value === 'mock'
@@ -86,6 +94,7 @@ async function refresh() {
 }
 
 function autoReply() {
+  if (state?.voice?.active && state.voice.owner !== voiceOwner) return
   const candidate = state?.director?.candidate
   if (submitting || activeRequest || state?.director?.mode !== 'auto' || !candidate || candidate.id <= attemptedDecision) return
   if ($('engine').value === 'deepseek' && !state.deepseekConfigured) {
@@ -109,7 +118,7 @@ async function generate(source, decision) {
   trace('请求', `${source === 'director' ? '自动导演' : '人工导演'} · ${engine === 'mock' ? '模拟回复' : 'DeepSeek'}`)
   let first = true, ended = false
   try {
-    const response = await api('reply',{source,engine,delivery:'text', ...(source === 'host' ? {text:$('hostText').value} : source === 'director' ? {decision} : {})},controller.signal)
+    const response = await api('reply',{source,engine,voiceOwner,delivery:'text', ...(source === 'host' ? {text:$('hostText').value} : source === 'director' ? {decision} : {})},controller.signal)
     const reader = response.body.getReader(), decoder = new TextDecoder()
     let buffer = ''
     while (true) {
@@ -127,7 +136,7 @@ async function generate(source, decision) {
         }
         if (['done','cancelled','error'].includes(item.type)) {
           ended=true
-          feedback(item.type === 'done' ? '文字回答完成' : item.type === 'cancelled' ? '已打断，未完成回复不进入上下文' : item.message)
+          feedback(item.type === 'done' ? (item.awaitingPlayback ? '文字已生成，正在交给系统声音朗读' : '文字回答完成') : item.type === 'cancelled' ? '已打断，未完成回复不进入上下文' : item.message)
           trace(item.type === 'done' ? '完成' : item.type === 'cancelled' ? '打断' : '失败', $('result').textContent)
         }
       }
@@ -242,16 +251,16 @@ function renderMessage(entry) {
   node.avatar.textContent = ['assistant','director'].includes(entry.role) ? '鲸' : entry.role === 'host' ? '主' : '弹'
   node.sender.textContent = entry.role === 'viewer' ? (entry.userId || '观众') : entry.role === 'host' ? '主播' : '小鲸鱼'
   node.badge.textContent = entry.role === 'director' ? '导演决定 · ' + (decisionLabels[entry.reason] ?? actions[entry.action] ?? entry.action) :
-    entry.role === 'assistant' ? (entry.delivery === 'reaction' ? '文字 / 表情回应 · 不开口' : '助播回复') : entry.role === 'viewer' ? '模拟弹幕' : '模拟发言'
+    entry.role === 'assistant' ? (entry.delivery === 'reaction' ? '文字 / 表情回应 · 不开口' : '助播回复') : entry.role === 'viewer' ? '模拟弹幕' : entry.input === 'microphone' ? '麦克风识别' : '模拟发言'
   node.time.textContent = new Date(entry.at).toLocaleTimeString('zh-CN',{hour12:false})
   node.time.dateTime = new Date(entry.at).toISOString()
   node.quote.hidden = entry.role !== 'assistant' || !entry.replyingTo
   node.quote.textContent = entry.replyingTo ? '回复：' + entry.replyingTo : ''
   node.bubble.textContent = entry.role === 'director' ? (entry.explanation ?? directorWords[entry.reason] ?? reasons[entry.reason] ?? entry.reason) :
     entry.text || (entry.status === 'generating' ? '正在想怎么回答…' : entry.status === 'cancelled' ? '还没说出文字就被打断了。' : '没有收到回复文字。')
-  const labels = {generating:'正在回复…',completed:'回答完成',cancelled:'已打断 · 保留可见片段',failed:'调用失败',awaitingPlayback:'等待播放反馈'}
+  const labels = {generating:'正在回复…',completed:'回答完成',cancelled:'已打断 · 保留可见片段',failed:'调用失败',awaitingPlayback:'等待朗读',speaking:'正在朗读'}
   node.status.textContent = entry.role === 'assistant' ?
-    [entry.performance ? '表演意图：'+poseNames[entry.performance] : '', entry.engine === 'mock' ? '模拟回复 · 无 API 调用' : entry.model, entry.decisionMs !== undefined ? '判断与拟稿 ' + entry.decisionMs + ' ms' : entry.firstMs === null ? '' : '生成首字 ' + entry.firstMs + ' ms', labels[entry.status], entry.error].filter(Boolean).join(' · ') : entry.decisionMs !== undefined ? '自主判断 ' + entry.decisionMs + ' ms' : ''
+    [entry.performance ? '表演意图：'+poseNames[entry.performance] : '', entry.engine === 'mock' ? '模拟回复 · 无 API 调用' : entry.model, entry.decisionMs !== undefined ? '判断与拟稿 ' + entry.decisionMs + ' ms' : entry.firstMs == null ? '' : '生成首字 ' + entry.firstMs + ' ms', labels[entry.status], entry.error].filter(Boolean).join(' · ') : entry.decisionMs !== undefined ? '自主判断 ' + entry.decisionMs + ' ms' : ''
   node.status.hidden = !node.status.textContent
   $('chatEmpty').hidden = messageNodes.size > 0
   if (pinned) $('chatScroll').scrollTop = $('chatScroll').scrollHeight
@@ -362,3 +371,33 @@ async function runQuickTrial(engine) {
 }
 bind('quickDemo', () => runQuickTrial('mock'))
 bind('quickReal', () => runQuickTrial('deepseek'))
+
+function renderVoice(voice) {
+  if (!voice) return
+  const owned = voice.owner === voiceOwner
+  $('voiceStart').disabled = !voice.available || voice.active
+  $('voiceStop').disabled = !voice.active || !owned
+  $('voiceOutput').disabled = voice.active
+  $('voiceLevel').value = voice.level
+  $('voiceState').textContent = voice.error || (voice.active
+    ? !owned ? '另一页正在收音' : !voice.ready ? '正在启动中文识别…' : voice.speaking ? '小鲸鱼正在朗读 · 戴耳机可同时说话' : '收音中 · 用 Windows 默认麦克风'
+    : voice.available ? '未收音 · 点击后开启本机中文识别' : '此入口需要 Windows 中文语音组件')
+  $('voiceConfirm').hidden = !voice.uncertain || !owned
+  $('voiceTranscript').textContent = voice.uncertain ? '这句识别不确定：' + voice.uncertain : voice.partial ? '正在听：' + voice.partial : voice.final ? '刚刚听到：' + voice.final : '你的话会自动进入中间聊天。'
+}
+bind('voiceStart', async () => {
+  renderVoice(await (await api('voice/start', {owner:voiceOwner,output:$('voiceOutput').checked})).json())
+})
+bind('voiceConfirm', async () => {
+  if (!state?.voice?.uncertain) return
+  $('hostText').value = state.voice.uncertain
+  $('hostText').focus()
+  feedback('已填入主播输入框，确认或改正后点“说完这句，发送”。')
+})
+bind('voiceStop', async () => {
+  renderVoice(await (await api('voice/stop', {owner:voiceOwner})).json())
+})
+window.addEventListener('pagehide', () => {
+  if (state?.voice?.owner === voiceOwner)
+    void fetch('/api/voice/stop', {method:'POST',headers:headers(),body:JSON.stringify({owner:voiceOwner}),keepalive:true}).catch(()=>{})
+})

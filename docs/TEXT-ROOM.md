@@ -1,6 +1,6 @@
 # 本机文字虚拟直播间
 
-本轮先开发 AIRI 的 stage-web。stage-tamagotchi 桌面端后续接入。
+stage-web 与 stage-tamagotchi 桌面开发版已接入同一场次。本页介绍文字模拟，麦克风与系统朗读见 [桌面与语音试播](DESKTOP-VOICE.md)。
 
 舞台下方新增姿态试演与连接状态。完整步骤见 [小鲸鱼与表演第一版](LIVE2D-PERFORMANCE.md)。
 

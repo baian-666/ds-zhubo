@@ -1,6 +1,6 @@
 # Local AIRI performance bridge
 
-This overlay targets the pinned AIRI commit in airi.lock.json. It changes only stage-web.
+This overlay targets the pinned AIRI commit in airi.lock.json. It supports stage-web and stage-tamagotchi.
 
 ## Restore
 
@@ -30,4 +30,16 @@ The default Live2D model supports the tested head, eye and mouth-form poses.
 Other models can expose different parameters. This bridge does not invent model-specific expression files or motion groups.
 The receipt reports model readiness and the requested pose. It is not a measurement of every rendered parameter.
 Only one active rehearsal page is intended. Multi-window ownership needs further testing.
-This version has no real speech audio or audio-driven mouth opening.
+Windows speech runs in the cohost backend. This bridge has no audio-driven mouth opening.
+
+## Desktop
+
+Run npm run setup:desktop once, then npm run dev:desktop.
+scripts/patch-desktop.mjs applies the tracked desktop overlay without resetting the vendor checkout.
+The main process opens a sandboxed cohost console and polls the loopback cohost API.
+Eventa carries validated performance commands from main to the stage renderer.
+The desktop page supplies its own model-ready state. It does not use web startup resources.
+The same pose driver handles expiry and disconnect release on both surfaces.
+Credentials stay in the main process. The renderer receives only the bounded performance command.
+Desktop settings live in the ignored data/desktop-profile directory.
+The local rehearsal uses Windows recognition. Upstream Sherpaw model downloads remain lazy in this profile.
