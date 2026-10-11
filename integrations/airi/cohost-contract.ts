@@ -9,7 +9,7 @@ export const commandSchema = v.object({
   expiresAt: v.number(),
 })
 export type Command = v.InferOutput<typeof commandSchema>
-export interface Receipt { ready: boolean, name: Command['name'], session: string, id: number }
+export interface Receipt { ready: boolean, expression?: string, name: Command['name'], session: string, id: number }
 export const commandEvent = defineEventa<Command>('cohost:performance')
 export const receiptEvent = defineEventa<Receipt>('cohost:receipt')
 export const channel = 'ds-zhubo-performance-v1'

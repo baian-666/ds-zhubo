@@ -72,6 +72,8 @@ try {
   assert.ok(calls.some(c=>c.kind==='asr'));assert.ok(calls.some(c=>c.kind==='tts'))
   const frame=page.frames().find(f=>f.url().startsWith('http://127.0.0.1:5173'))
   const module='/@fs/'+fileURLToPath(new URL('../vendor/airi/packages/stage-ui/src/stores/audio.ts',import.meta.url)).replaceAll('\\','/')
+  result.model=await frame.evaluate(()=>{const store=document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('live2d-expressions');return {id:store.modelId,expressions:store.expressionGroups.size}})
+  if(process.argv.includes('--live2d')){assert.ok(result.model.id.startsWith('display-model-'));assert.equal(result.model.expressions,44)}
   result.speaking=await frame.evaluate(async path=>{const {useSpeakingStore}=await import(path);return {speaking:useSpeakingStore().nowSpeaking,mouth:useSpeakingStore().mouthOpenSize}},module)
   if(!real) {
   const second=await fetch(base+'/api/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'host',text:'再说一句，测试停播',voiceOwner:result.state.airi.control})})
@@ -79,12 +81,17 @@ try {
   await page.waitForFunction(()=>document.querySelector('#voiceState').textContent.includes('正在说话'))
   result.mouthDuring=await frame.evaluate(async path=>{
     const {useSpeakingStore}=await import(path)
-    const samples=[]
-    for(let i=0;i<20;i++){samples.push(useSpeakingStore().mouthOpenSize);await new Promise(r=>setTimeout(r,25))}
-    return {max:Math.max(...samples),speaking:useSpeakingStore().nowSpeaking}
+    let element=document.querySelector('canvas');while(element&&!element.__vueParentComponent)element=element.parentElement
+    let scene=element.__vueParentComponent;while(scene&&scene.type.__name!=='Live2D')scene=scene.parent
+    const raw=scene.devtoolsRawSetupState.live2dModelRef.value.$.devtoolsRawSetupState
+    const core=raw.model.value.internalModel.coreModel
+    const samples=[],rendered=[]
+    for(let i=0;i<20;i++){samples.push(useSpeakingStore().mouthOpenSize);rendered.push(core.getParameterValueById('ParamMouthOpenY'));await new Promise(r=>setTimeout(r,25))}
+    return {max:Math.max(...samples),renderedMax:Math.max(...rendered),speaking:useSpeakingStore().nowSpeaking}
   },module)
   assert.equal(result.mouthDuring.speaking,true)
   assert.ok(result.mouthDuring.max>0,'actual audio must drive lip sync')
+  assert.ok(result.mouthDuring.renderedMax>0,'the loaded model mouth must move')
   const interruptedAt=Date.now()
   await page.locator('#interrupt').click()
   await frame.waitForFunction(async path=>!(await import(path)).useSpeakingStore().nowSpeaking,module,{timeout:3000})

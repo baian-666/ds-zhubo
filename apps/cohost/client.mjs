@@ -3,10 +3,11 @@ const $ = id => document.getElementById(id)
 const voiceOwner = crypto.randomUUID()
 let voiceLeaseAt = 0
 const poseNames={idle:'待机',listen:'倾听',think:'思考',nod:'点头',smile:'轻笑',surprise:'惊讶',pout:'嘴硬'}
-let stageSeen=0
+let stageSeen=0, stageReady=false
 const stageBridge=connectStage($('stage'), status=>{
   stageSeen=Date.now()
-  $('performanceState').textContent=status.ready ? '角色已连接 · '+poseNames[status.name]+' · 本机姿态表演' : '表演桥接已连接 · 等待 Live2D 模型加载'
+  stageReady=status.ready
+  $('performanceState').textContent=status.ready ? '角色已连接 · '+poseNames[status.name]+(status.expression ? ' · 表情：'+status.expression : ' · 本机表演') : '表演桥接已连接 · 等待 Live2D 模型加载'
 })
 for(const button of document.querySelectorAll('[data-pose]'))button.onclick=()=>safe(()=>api('performance',{name:button.dataset.pose}))
 
@@ -385,6 +386,7 @@ function renderVoice(voice) {
   if (isCloud && cloud) {
     const owned=cloud.control===voiceOwner
     const connected=cloud.stages.some(stage=>stage.stage===$('voiceStage').value && stage.ready)
+      && ($('voiceStage').value!=='web' || (stageReady && Date.now()-stageSeen<3500))
     $('voiceStart').disabled=!cloud.configured || cloud.active || voice.active || !connected
     $('voiceStop').disabled=!cloud.active || !owned
     $('voiceLevel').hidden=true

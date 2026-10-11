@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -9,6 +10,20 @@ const vendor=join(root,'vendor/airi')
 const lock=JSON.parse(readFileSync(join(root,'airi.lock.json'),'utf8'))
 const head=spawnSync('git',['rev-parse','HEAD'],{cwd:vendor,encoding:'utf8'})
 if(head.status!==0 || head.stdout.trim()!==lock.commit)throw new Error('AIRI revision differs from the pinned base')
+const localModel=join(root,'data/live2d/whale-airi.zip')
+if(existsSync(localModel)) {
+  const publicDir=join(vendor,'apps/stage-web/public')
+  mkdirSync(publicDir,{recursive:true})
+  const modelDestination=join(publicDir,'cohost-whale.zip')
+  const modelBytes=readFileSync(localModel)
+  const fingerprint=bytes=>createHash('sha256').update(bytes).digest('hex')
+  const savedHash=join(root,'data/airi-overlay/cohost-whale.sha256')
+  if(existsSync(modelDestination)&&!readFileSync(modelDestination).equals(modelBytes)&&
+    (!existsSync(savedHash)||fingerprint(readFileSync(modelDestination))!==readFileSync(savedHash,'utf8')))
+    throw new Error('Local AIRI model copy has unsaved edits')
+  if(!existsSync(modelDestination)||!readFileSync(modelDestination).equals(modelBytes))writeFileSync(modelDestination,modelBytes)
+  mkdirSync(join(root,'data/airi-overlay'),{recursive:true});writeFileSync(savedHash,fingerprint(modelBytes))
+}
 const destination=join(vendor,'apps/stage-web/src/cohost')
 mkdirSync(destination,{recursive:true})
 for(const name of ['cohost-contract.ts','cohost-parent.ts','use-cohost-performance.ts']) {
