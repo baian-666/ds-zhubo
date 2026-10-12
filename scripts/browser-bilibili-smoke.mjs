@@ -4,17 +4,18 @@ import {writeFileSync} from 'node:fs'
 import {createApp} from '../apps/cohost/server.mjs'
 import {biliPacket,decodeBiliPackets} from '../apps/cohost/bilibili.mjs'
 
-// Isolated official-protocol fixtures drive the actual panels. No external platform or model calls occur.
+// Isolated protocol fixtures drive the actual panels. No external platform or model calls occur.
+const relay=process.argv.includes('--relay'),prefix=relay?'blivechat':'bilibili'
 const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'playwright')
 let socket,plans=0
 class Socket extends EventTarget {
  constructor(){super();socket=this;queueMicrotask(()=>this.dispatchEvent(new Event('open')))}
- send(bytes){if(decodeBiliPackets(bytes)[0].operation===7)queueMicrotask(()=>this.emit(biliPacket(8,'{"code":0}')))}
+ send(bytes){if(relay){if(JSON.parse(bytes).cmd===1)queueMicrotask(()=>this.emit('{"cmd":0}'))}else if(decodeBiliPackets(bytes)[0].operation===7)queueMicrotask(()=>this.emit(biliPacket(8,'{"code":0}')))}
  emit(bytes){this.dispatchEvent(new MessageEvent('message',{data:bytes}))}
  close(){this.dispatchEvent(new Event('close'))}
 }
 const fixture=createApp({apiKey:'fixture-only',token:'',semanticEnabled:true,rehearsal:true,airiOptions:{key:''},
- bilibiliOptions:{config:{accessKeyId:'fixture',accessKeySecret:'fixture-secret',appId:'123',code:'fixture-code'},WebSocketImpl:Socket,
+ bilibiliOptions:{source:relay?'blivechat':'official',config:relay?{url:'ws://127.0.0.1:12451/api/chat',code:'fixture-code'}:{accessKeyId:'fixture',accessKeySecret:'fixture-secret',appId:'123',code:'fixture-code'},WebSocketImpl:Socket,
   fetchImpl:async url=>Response.json({code:0,data:url.endsWith('/start')?{game_info:{game_id:'fixture'},anchor_info:{room_id:123},websocket_info:{wss_link:['wss://fixture.bilibili.com/sub'],auth_body:'fixture'}}:{}})},
  planner:async snapshot=>{plans++;const viewer=snapshot.eligibleViewers[0];return {action:'reply_viewer',reason:'这条猫咪弹幕接得上刚才的话题。',text:'跑步机成了猫咪的豪华卧室，运动的是你的钱包。',targetId:viewer.id,platform:viewer.platform}},
  reply:async function*(){throw Error('Prepared reply must not call a second model')},
@@ -48,7 +49,9 @@ try {
  await panel(page).getByRole('button',{name:/^(连接 B站弹幕|Connect Bilibili chat)$/}).click()
  for(const target of pages)await panel(target).locator('[data-bilibili]').getByText(/(B站弹幕 · 已连接|Bilibili chat · Connected)/).waitFor()
  const event={cmd:'LIVE_OPEN_PLATFORM_DM',data:{msg_id:'fixture-message',room_id:123,open_id:'fixture-user',uname:'猫咪观众',msg:'我的跑步机被猫咪占领了',timestamp:Math.floor(Date.now()/1000)}}
- socket.emit(biliPacket(5,JSON.stringify(event)));socket.emit(biliPacket(5,JSON.stringify(event)))
+ const wire=relay?JSON.stringify({cmd:2,data:['',Math.floor(Date.now()/1000),'猫咪观众',0,event.data.msg,0,0,1,0,1,0,'fixture-message','',0,[],[],'fixture-user','',0]}):biliPacket(5,JSON.stringify(event))
+ socket.emit(wire);socket.emit(wire)
+ if(relay)for(const target of pages)await panel(target).getByText(/(来源：本机 blivechat|Source: local blivechat)/).waitFor()
  for(const target of pages) {
   await panel(target).locator('[data-role="assistant"]').filter({hasText:'运动的是你的钱包'}).waitFor()
   assert.equal(await panel(target).locator('[data-role="viewer"]').count(),1)
@@ -58,13 +61,13 @@ try {
  assert.equal(plans,1)
  await panel(stage).getByRole('button',{name:/^(断开 B站弹幕|Disconnect Bilibili chat)$/}).click()
  await panel(page).locator('[data-bilibili]').getByText(/(B站弹幕 · 未连接|Bilibili chat · Disconnected)/).waitFor()
- await page.screenshot({path:'data/bilibili-panel-web.png'})
- await stage.screenshot({path:'data/bilibili-panel-desktop.png'})
+ await page.screenshot({path:`data/${prefix}-panel-web.png`})
+ await stage.screenshot({path:`data/${prefix}-panel-desktop.png`})
  await page.setViewportSize({width:390,height:780})
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true)
  assert.deepEqual(errors,[])
- const result={kind:'mock Bilibili protocol, actual desktop/web UI',plans,errors,checks:['connect and disconnect from either panel','fresh ordinary comment reaches planner','duplicate shown once','nickname and real source label','prepared reply uses one model call','390px layout']}
- writeFileSync('data/bilibili-browser-result.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result))
+ const result={kind:relay?'mock blivechat protocol, actual desktop/web UI':'mock Bilibili protocol, actual desktop/web UI',plans,errors,checks:['connect and disconnect from either panel','fresh ordinary comment reaches planner','duplicate shown once','nickname and real source label','prepared reply uses one model call','390px layout']}
+ writeFileSync(`data/${prefix}-browser-result.json`,JSON.stringify(result,null,2));console.log(JSON.stringify(result))
 } finally {
  for(const target of pages) {
   const old=restore.get(target)

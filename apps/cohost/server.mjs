@@ -15,6 +15,8 @@ import { Scene } from './scene.mjs'
 import { Participation } from './participation.mjs'
 import { planParticipation } from './participation-model.mjs'
 import { BilibiliLive } from './bilibili.mjs'
+import { BlivechatRelay, blivechatConfig } from './blivechat.mjs'
+import { parseEnv } from 'node:util'
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status }
@@ -53,7 +55,7 @@ function authorized(request, token) {
   return actual.length === expected.length && timingSafeEqual(actual, expected)
 }
 
-export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = process.env.DEEPSEEK_MODEL || 'deepseek-flash', token = process.env.COHOST_ACCESS_TOKEN || '', scheduler = new Scheduler(), director = new Director({ scheduler }), reply = streamReply, semanticEnabled = false, planner, participationOptions = {}, rehearsal = false, voiceOptions = {}, airiOptions = {}, bilibiliOptions = {}, roomSnapshot } = {}) {
+export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = process.env.DEEPSEEK_MODEL || 'deepseek-flash', token = process.env.COHOST_ACCESS_TOKEN || '', scheduler = new Scheduler(), director = new Director({ scheduler }), reply = streamReply, semanticEnabled = false, planner, participationOptions = {}, rehearsal = false, voiceOptions = {}, airiOptions = {}, bilibiliOptions = {}, bilibiliEnvPath = new URL('../../.env',import.meta.url), roomSnapshot } = {}) {
   const histories = { deepseek: [], mock: [] }
   const room = new RoomJournal({snapshot:roomSnapshot})
   let initializing=true
@@ -75,7 +77,9 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
     participation.notify()
     return true
   }
-  const bilibili=new BilibiliLive({...bilibiliOptions,onMessage:acceptDanmaku})
+  const BilibiliSource=(bilibiliOptions.source ?? process.env.BILIBILI_SOURCE)==='blivechat'?BlivechatRelay:BilibiliLive
+  let bilibili=new BilibiliSource({...bilibiliOptions,onMessage:acceptDanmaku})
+  let reloadingBilibili=false
   function directorEvent(body) {
     const previousRevision = director.revision
     const result = director.event(body)
@@ -323,7 +327,21 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       if (!request.headers['content-type']?.startsWith('application/json')) throw new HttpError(415, '需要 application/json')
       if (request.headers['sec-fetch-site'] === 'cross-site' && !localStage) throw new HttpError(403, '不接受跨站请求')
       const body = await readBody(request)
+      if (path === '/api/bilibili/reload') {
+        if(!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(request.socket.remoteAddress))throw new HttpError(403,'弹幕配置仅能在本机更新')
+        if(reloadingBilibili)throw new HttpError(409,'正在更新弹幕配置')
+        reloadingBilibili=true
+        try {
+          let env
+          try{env=parseEnv(readFileSync(bilibiliEnvPath,'utf8'))}catch{throw new HttpError(400,'本机弹幕配置未完成')}
+          const candidate=new BlivechatRelay({config:blivechatConfig(env),onMessage:acceptDanmaku})
+          if(env.BILIBILI_SOURCE!=='blivechat' || !candidate.status().configured)throw new HttpError(400,'本机弹幕配置无效')
+          await bilibili.stop();bilibili=candidate
+          json(response,200,bilibili.status());return
+        } finally {reloadingBilibili=false}
+      }
       if (path === '/api/bilibili/start' || path === '/api/bilibili/stop') {
+        if(reloadingBilibili)throw new HttpError(409,'正在更新弹幕配置')
         if(!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(request.socket.remoteAddress))throw new HttpError(403,'B站连接仅能在本机控制')
         json(response,200,path.endsWith('/start')?bilibili.start():await bilibili.stop());return
       }

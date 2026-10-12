@@ -37,6 +37,7 @@ const statusSchema = v.object({
   muted: v.boolean(),
   hostSpeaking: v.boolean(),
   bilibili: v.object({
+    source: v.string(),
     configured: v.boolean(),
     state: v.string(),
     error: v.nullable(v.string()),
@@ -326,7 +327,9 @@ onUnmounted(() => {
         <p>{{ t('tip') }}</p>
         <div data-bilibili :class="['mt-2 flex flex-col gap-2']">
           <strong>{{ t('biliTitle') }} · {{ t(`bili_${state?.bilibili.state ?? 'disconnected'}`) }}</strong>
+          <span v-if="state?.bilibili.source === 'blivechat'">{{ t('biliLocalRelay') }}</span>
           <span v-if="!state?.bilibili.configured">{{ t('biliMissing') }}</span>
+          <a v-if="!state?.bilibili.configured" href="http://127.0.0.1:8791/" target="_blank" rel="noopener noreferrer">{{ t('biliSetup') }}</a>
           <span v-if="state?.bilibili.error">{{ t(`biliError_${state.bilibili.error}`) }}</span>
           <span v-if="state?.bilibili.roomId">{{ t('biliRoom', { room: state.bilibili.roomId }) }}</span>
           <span>{{ t('biliCount', { accepted: state?.bilibili.accepted ?? 0, dropped: state?.bilibili.dropped ?? 0 }) }}</span>

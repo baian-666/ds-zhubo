@@ -81,7 +81,7 @@ export class BilibiliLive {
     const missing=Object.entries({accessKeyId:'开发者 ID',accessKeySecret:'开发者密钥',appId:'应用 ID',code:'主播身份码'})
       .filter(([key])=>!this.config[key]).map(([,name])=>name)
     const valid=/^[1-9]\d{0,18}$/.test(this.config.appId??'')
-    return {configured:!missing.length && valid,missing,state:this.state,error:this.error,roomId:this.roomId,
+    return {source:'official',configured:!missing.length && valid,missing,state:this.state,error:this.error,roomId:this.roomId,
       received:this.received,accepted:this.accepted,dropped:this.dropped,retries:this.retries,lastMessageAt:this.lastMessageAt}
   }
   start() {

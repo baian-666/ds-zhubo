@@ -7,6 +7,10 @@ $env:PATH = (Split-Path -Parent $taskNode) + ';' + $env:PATH
 $taskMutex = New-Object System.Threading.Mutex($false, 'Local\ds-zhubo-cohost-launch')
 if (!$taskMutex.WaitOne(10000)) { throw 'Another launcher is still starting the cohost.' }
 try {
+  $taskEnvFile=Join-Path $taskRoot '.env'
+  if ((Test-Path -LiteralPath $taskEnvFile) -and [IO.File]::ReadAllText($taskEnvFile) -match '(?m)^\s*BILIBILI_SOURCE\s*=\s*blivechat\s*$') {
+    try { & (Join-Path $PSScriptRoot 'start-bilibili.ps1') -SkipSetup } catch { Write-Warning 'Local chat relay did not start. The cohost is still available; retry the chat setup later.' }
+  }
   $taskHealthy = $false
   try { $taskHealthy = (Invoke-RestMethod 'http://127.0.0.1:8787/healthz' -TimeoutSec 2).ok } catch {}
   if ($taskHealthy) { return }
