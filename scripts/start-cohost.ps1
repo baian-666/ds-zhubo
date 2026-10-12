@@ -1,3 +1,4 @@
+param([string]$RoomSnapshot)
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 $taskNode = Join-Path $taskRoot 'data/toolchains/node-v26.7.0-win-x64/node.exe'
@@ -9,7 +10,14 @@ try {
   $taskHealthy = $false
   try { $taskHealthy = (Invoke-RestMethod 'http://127.0.0.1:8787/healthz' -TimeoutSec 2).ok } catch {}
   if ($taskHealthy) { return }
-  $taskServer = Start-Process -FilePath $taskNode -ArgumentList '--env-file-if-exists=.env','apps/cohost/server.mjs' -WorkingDirectory $taskRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $taskRoot 'data/cohost-launch.out.log') -RedirectStandardError (Join-Path $taskRoot 'data/cohost-launch.err.log')
+  $taskArguments=@('--env-file-if-exists=.env','apps/cohost/server.mjs')
+  if ($RoomSnapshot) {
+    $taskResolvedSnapshot=(Resolve-Path -LiteralPath $RoomSnapshot).Path
+    $taskDataRoot=[IO.Path]::GetFullPath((Join-Path $taskRoot 'data')) + [IO.Path]::DirectorySeparatorChar
+    if (!$taskResolvedSnapshot.StartsWith($taskDataRoot,[StringComparison]::OrdinalIgnoreCase) -or $taskResolvedSnapshot.Contains('"')) { throw 'Room snapshot must be a local file under data.' }
+    $taskArguments += '"--room-snapshot=' + $taskResolvedSnapshot + '"'
+  }
+  $taskServer = Start-Process -FilePath $taskNode -ArgumentList $taskArguments -WorkingDirectory $taskRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $taskRoot 'data/cohost-launch.out.log') -RedirectStandardError (Join-Path $taskRoot 'data/cohost-launch.err.log')
   Set-Content -LiteralPath (Join-Path $taskRoot 'data/cohost.pid') -Value $taskServer.Id
   for ($taskTry = 0; $taskTry -lt 20; $taskTry++) {
     Start-Sleep -Milliseconds 500

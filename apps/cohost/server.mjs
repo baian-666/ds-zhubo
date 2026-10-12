@@ -52,13 +52,13 @@ function authorized(request, token) {
   return actual.length === expected.length && timingSafeEqual(actual, expected)
 }
 
-export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = process.env.DEEPSEEK_MODEL || 'deepseek-flash', token = process.env.COHOST_ACCESS_TOKEN || '', scheduler = new Scheduler(), director = new Director({ scheduler }), reply = streamReply, semanticEnabled = false, planner, participationOptions = {}, rehearsal = false, voiceOptions = {}, airiOptions = {} } = {}) {
+export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = process.env.DEEPSEEK_MODEL || 'deepseek-flash', token = process.env.COHOST_ACCESS_TOKEN || '', scheduler = new Scheduler(), director = new Director({ scheduler }), reply = streamReply, semanticEnabled = false, planner, participationOptions = {}, rehearsal = false, voiceOptions = {}, airiOptions = {}, roomSnapshot } = {}) {
   const histories = { deepseek: [], mock: [] }
-  const room = new RoomJournal()
+  const room = new RoomJournal({snapshot:roomSnapshot})
   const scene = new Scene()
   const performance = new Performance()
   let live = false
-  const participation = new Participation({ ...participationOptions, director, scheduler, scene,
+  const participation = new Participation({ ...participationOptions, director, scheduler, scene, history:()=>histories.deepseek,
     onReaction: result => {
       performance.play(result.performance ?? 'nod', {source:'reaction',motion:result.motion})
       room.add('assistant',result.text || '（姿态回应）',{status:'completed',delivery:'reaction',engine:'deepseek',model,performance:result.motion ? 'sequence' : result.performance,motionLabel:result.motion?.label})
@@ -70,7 +70,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
     const result = director.event(body)
     if (director.revision !== previousRevision) participation.invalidate()
     if (director.revision !== previousRevision && ['speech-start','topic-change','mode'].includes(body.type)) performance.clear()
-    if (body.type === 'topic-change') scene.clear()
+    if (body.type === 'topic-change') scene.nextTopic()
     participation.notify()
     return result
   }
@@ -115,7 +115,8 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
     if (previous?.role === 'director' && previous.reason === entry.reason &&
       previous.action === entry.action && previous.directorRevision === entry.revision) return
     room.add('director', '', { action: entry.action, reason: entry.reason, traceId: entry.id,
-      directorRevision: entry.revision, at: entry.at, explanation:entry.explanation, decisionMs:entry.decisionMs })
+      directorRevision: entry.revision, at: entry.at, explanation:entry.explanation, decisionMs:entry.decisionMs,
+      errorCode:entry.errorCode,performanceWarnings:entry.performanceWarnings })
   }
   director.onTranscript = ({ text, utterance }) => { room.host(text, utterance); scene.host(text, utterance) }
   scheduler.onDelivered = (input, answer) => {
@@ -156,7 +157,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       let completed = false
       try {
         const chunks = turn.preparedReply && engine === 'deepseek' ? [turn.preparedReply] :
-          (engine === 'mock' ? mockReply : reply)({ apiKey, model, history: [...histories[engine]], scene:scene.snapshot(engine), input: turn.input, signal: turn.controller.signal })
+          (engine === 'mock' ? mockReply : reply)({ apiKey, model, history: [...histories[engine]], scene:scene.snapshot(engine), currentTopic:scene.topic, input: turn.input, signal: turn.controller.signal })
         for await (const chunk of performedText(chunks, (name,motion) => {
           if (scheduler.isCurrent(turn)) {
             performance.play(name,{turn:turn.id,motion,defer:turn.delivery==='audio' && turn.playback!=='playing'})
@@ -418,10 +419,6 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
         }
         const accepted = scheduler.enqueue(message)
         if (accepted) {
-          if (director.candidate?.preparedReply) {
-            if (!director.candidate.source) participation.observedUtterance=null
-            director.invalidate('scene_changed')
-          }
           scene.add('viewer', message.text, {userId:message.userId, platform:message.platform, messageId:message.id})
           participation.notify()
           room.add('viewer', message.text, { userId: message.userId, platform: message.platform, messageId: message.id })
@@ -488,7 +485,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be 1–65535.')
   if (!['127.0.0.1', '::1', 'localhost'].includes(host) && (process.env.COHOST_ACCESS_TOKEN?.length ?? 0) < 24)
     throw new Error('Set COHOST_ACCESS_TOKEN (24+ characters) before binding beyond loopback.')
-  const server = createApp({semanticEnabled:Boolean(process.env.DEEPSEEK_API_KEY),rehearsal:true})
+  const savedRoom=process.argv.find(arg=>arg.startsWith('--room-snapshot='))?.slice('--room-snapshot='.length)
+  const server = createApp({semanticEnabled:Boolean(process.env.DEEPSEEK_API_KEY),rehearsal:true,
+    roomSnapshot:savedRoom ? JSON.parse(readFileSync(savedRoom,'utf8')) : undefined})
   server.listen(port, host, () => console.log(`文字联调台 http://${host}:${port} — 本机虚拟直播间 · AIRI 语音试播可按需开启`))
   const stop = () => { server.close(); server.closeAllConnections() }
   process.on('SIGTERM', stop)

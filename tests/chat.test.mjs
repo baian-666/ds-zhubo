@@ -27,6 +27,22 @@ async function serve(t, options = {}) {
     state: async () => (await fetch(base + '/api/status')).json(),
   }
 }
+
+test('local display recovery preserves bubbles without reviving audio, old utterances or model memory',async t=>{
+ const original=new RoomJournal()
+ original.host('上一场发言',1);original.add('assistant','未播完的文字',{status:'speaking',turn:12,engine:'deepseek'})
+ const snapshot=original.status()
+ const restored=new RoomJournal({snapshot})
+ assert.notEqual(restored.session,snapshot.session)
+ assert.equal(restored.entries[1].status,'cancelled');assert.equal(restored.entries[0].utterance,undefined)
+ assert.equal(restored.entries[1].turn,undefined);assert.equal(snapshot.entries[1].status,'speaking')
+ assert.equal(restored.add('host','新发言').id,3)
+ let calls=0
+ const r=await serve(t,{roomSnapshot:snapshot,reply:async function*({history,scene}){calls++;assert.equal(history.length,0);assert.ok(!scene.some(x=>x.text==='上一场发言'));yield '新回答'}})
+ const state=await r.state();assert.equal(state.busy,false);assert.equal(state.airi.active,false);assert.equal(state.room.entries.length,2)
+ await (await r.post('reply',{source:'host',engine:'deepseek',text:'新发言'})).text();assert.equal(calls,1)
+ assert.throws(()=>new RoomJournal({snapshot:{entries:[{id:1,role:'unknown',text:''}]}}))
+})
 test('host comes before director, duplicate final is ignored, and streaming reply updates one bubble', async t => {
   const r = await serve(t, { reply: async function* () { yield '第一段'; yield '第二段' } })
   await r.post('director/event', { type: 'mode', value: 'auto' })

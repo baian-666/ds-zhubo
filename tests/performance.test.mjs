@@ -43,7 +43,7 @@ test('reaction is single, bounded and does not claim a speech turn',async t=>{
  const message=args=>({tool_calls:[{function:{name:'participate',arguments:JSON.stringify(args)}}]})
  assert.equal(parseParticipation(message(result)).text,'？')
  assert.throws(()=>parseParticipation(message({...result,text:'x'.repeat(41)})))
- assert.throws(()=>parseParticipation(message({...result,performance:'unsafe'})))
+ assert.equal(parseParticipation(message({...result,performance:'unsafe'})).performance,undefined)
 })
 
 test('old decision requests preserve the newer candidate and Xiaojingyu has a fast handover',()=>{

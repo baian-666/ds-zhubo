@@ -1,10 +1,10 @@
 // Live observations are separate from delivered model conversation history.
 export class Scene {
   constructor({ limit = 60, maxChars = 12000, now = Date.now } = {}) {
-    this.limit = limit; this.maxChars = maxChars; this.now = now; this.version = 0; this.entries = []
+    this.limit = limit; this.maxChars = maxChars; this.now = now; this.version = 0; this.topic = 1; this.entries = []
   }
   add(role, text, meta = {}) {
-    const entry = { ...meta, role, text, at: this.now(), id: ++this.version }
+    const entry = { ...meta, topic:this.topic, role, text, at: this.now(), id: ++this.version }
     this.entries.push(entry)
     while (this.entries.length > this.limit || (this.entries.length > 1 && JSON.stringify(this.entries).length > this.maxChars)) this.entries.shift()
     return entry
@@ -16,5 +16,6 @@ export class Scene {
   snapshot(engine = 'deepseek') {
     return this.entries.filter(x => x.role !== 'assistant' || x.engine === engine).map(x => ({ ...x }))
   }
-  clear() { this.entries = []; this.version++ }
+  nextTopic() { this.topic++; this.version++ }
+  clear() { this.entries = []; this.topic=1; this.version++ }
 }

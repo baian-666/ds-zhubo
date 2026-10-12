@@ -111,9 +111,91 @@ test('waiting marks host observed, does not poll again, and new eligible viewer 
  f.scheduler.enqueue({id:'second',platform:'manual',userId:'b',text:'相关提问',mentioned:true});f.scene.add('viewer','相关提问')
  await f.p.run();assert.equal(calls,2);assert.equal(f.p.context().hostOpportunity,false)
 })
-test('stale scene and expired prepared candidates cannot be published',async t=>{
- let finish;const f=fixture(t,()=>new Promise(r=>{finish=r}));f.host('你说呢？');const work=f.p.run();f.scene.add('viewer','新消息');finish(action());await work
+test('new speech and expired prepared candidates cannot be published',async t=>{
+ let finish;const f=fixture(t,()=>new Promise(r=>{finish=r}));f.host('你说呢？');const work=f.p.run();f.host('换个问题，你说呢？');finish(action());await work
  assert.equal(f.director.candidate,null)
  f.p.plan=async()=>action();await f.p.run();assert.ok(f.director.candidate)
  const id=f.director.candidate.id;f.director.candidate.expiresAt=Date.now()-1;assert.equal(f.director.consume(id),null)
+})
+
+test('invalid optional actions preserve speech; misplaced components use full safety validation',()=>{
+ const parse=args=>parseParticipation({tool_calls:[{function:{name:'participate',arguments:JSON.stringify(args)}}]})
+ const bad=parse(action('reply_host',{performance:'unsafe',motion:{label:'错误',frames:[{ms:300,pose:{mouthOpen:1}}]}}))
+ assert.equal(bad.text,action().text);assert.equal(bad.motion,undefined);assert.equal(bad.performance,undefined)
+ assert.deepEqual(bad.warnings,['performance_dropped','motion_dropped'])
+ const motion={label:'摇尾',frames:[{ms:400,holdMs:900,pose:{headZ:.12}},{ms:400,pose:{headZ:-.08}}]}
+ const repaired=parse(action('reply_host',{motion,components:{peace:1,tailBase:.35,tailMid:-.3,tailTip:.4}}))
+ assert.equal(repaired.motion.frames[0].components.peace,1);assert.equal(repaired.motion.frames[0].components.tailMid,-.3)
+ assert.deepEqual(repaired.warnings,['components_relocated']);assert.equal(repaired.motion.frames[1].components,undefined)
+ for(const components of [{peace:2},{arbitrary:1}])assert.equal(parse(action('reply_host',{motion,components})).motion,undefined)
+ for(const motion of [null,[],{label:'坏结构',frames:{0:{pose:{}}}}]) {
+  const result=parse(action('reply_host',{motion,components:{peace:1}}));assert.equal(result.text,action().text);assert.equal(result.motion,undefined)
+ }
+ assert.throws(()=>parse({...action(),executeCommand:'unsafe'}),error=>error.code==='arguments')
+ for(const args of [null,[],{...action(),text:''}])assert.throws(()=>parse(args))
+})
+
+test('safe diagnostics distinguish provider failures and never expose upstream bodies',async t=>{
+ const {ParticipationError}=await import('../apps/cohost/participation-model.mjs')
+ const options={signal:new AbortController().signal,apiKey:'test-only'}
+ for(const [status,code] of [[401,'credentials'],[403,'credentials'],[429,'rate_limit'],[503,'provider']]) {
+  await assert.rejects(()=>planParticipation({}, {...options,fetchImpl:async()=>new Response('SECRET-UPSTREAM',{status})}),error=>error.code===code&&!error.message.includes('SECRET'))
+ }
+ await assert.rejects(()=>planParticipation({}, {...options,fetchImpl:async()=>{throw Error('SECRET-NETWORK')}}),error=>error.code==='network'&&!error.message.includes('SECRET'))
+ await assert.rejects(()=>planParticipation({}, {...options,fetchImpl:async()=>Response.json({choices:[{finish_reason:'length'}]})}),error=>error.code==='truncated')
+ const f=fixture(t,async()=>{throw new ParticipationError('credentials')});f.host('你说呢？');await f.p.run()
+ assert.equal(f.director.trace.at(-1).errorCode,'credentials');assert.ok(f.director.trace.at(-1).explanation.includes('密钥'))
+ assert.equal(f.director.candidate,null)
+})
+
+test('background danmaku cannot cancel a host reply or trigger another planning call',async t=>{
+ let finish,calls=0;const f=fixture(t,()=>{calls++;return new Promise(r=>{finish=r})})
+ f.director.event({type:'viewer-window',value:true})
+ f.host('你说呢？');const work=f.p.run()
+ for(let n=0;n<30;n++){
+  f.scheduler.enqueue({id:String(n),platform:'manual',userId:String(n),text:'路过'+n,mentioned:true})
+  f.scene.add('viewer','路过'+n);f.p.notify()
+ }
+ assert.equal(f.p.job.controller.signal.aborted,false)
+ finish(action());await work;assert.ok(f.director.candidate);assert.equal(calls,1)
+ const turn=f.director.consume(f.director.candidate.id);assert.equal(turn.preparedReply,action().text)
+})
+
+test('semantic invitation replaces an active answer, while spontaneous speech cannot',async t=>{
+ for(const invited of [true,false]) {
+  const f=fixture(t,async()=>action('reply_host',{hostIntent:invited?'invited':'spontaneous'}))
+  const old=f.scheduler.beginHost('上一句回答');f.host('请帮我总结一下。');await f.p.run()
+  assert.equal(old.controller.signal.aborted,invited)
+  if(invited)assert.equal(f.director.consume(f.director.candidate.id).preparedReply,action().text)
+  else assert.equal(f.director.candidate,null)
+ }
+})
+
+test('an acknowledgment does not block a new eligible audience question',async t=>{
+ const f=fixture(t,async()=>action('reply_viewer',{targetId:'q',platform:'manual'}));f.host('嗯，对')
+ f.director.event({type:'viewer-window',value:true});f.scheduler.enqueue({id:'q',platform:'manual',userId:'viewer',text:'相关问题',mentioned:true})
+ await f.p.run();assert.equal(f.director.candidate.messageId,'q')
+})
+
+test('both participation paths share delivered history and topic changes retain bounded memories',async t=>{
+ let snapshots=[],direct=[]
+ const server=createApp({apiKey:'test-only',semanticEnabled:true,participationOptions:{debounceMs:1},
+  planner:async snapshot=>{snapshots.push(snapshot);return action('wait')},
+  reply:async function*(context){direct.push(context);yield '猫叫年糕。'}})
+ server.listen(0,'127.0.0.1');await once(server,'listening');t.after(async()=>{server.closeAllConnections();await new Promise(r=>server.close(r))})
+ const base='http://127.0.0.1:'+server.address().port
+ const post=(path,body)=>fetch(base+'/api/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+ await (await post('reply',{source:'host',text:'猫叫年糕，记住了吗？',engine:'deepseek'})).text()
+ await post('director/event',{type:'topic-change'})
+ await post('director/event',{type:'mode',value:'auto'})
+ for(const e of [{type:'speech-start'},{type:'transcript',text:'刚才猫叫什么来着？',final:true},{type:'speech-end'}])await post('director/event',{...e,utterance:1})
+ for(let n=0;n<100&&!snapshots.length;n++)await delay(10)
+ assert.equal(snapshots[0].currentTopic,2);assert.equal(snapshots[0].history.at(-1).content,'猫叫年糕。')
+ assert.ok(snapshots[0].scene.some(x=>x.topic===1&&x.text.includes('年糕')))
+ await (await post('reply',{source:'host',text:'再回想一下',engine:'deepseek'})).text()
+ assert.deepEqual(direct[1].history,snapshots[0].history);assert.equal(direct[1].currentTopic,2)
+ await post('reset',{})
+ await (await post('reply',{source:'host',text:'新的一场',engine:'deepseek'})).text()
+ assert.equal(direct[2].history.length,0);assert.equal(direct[2].currentTopic,1)
+ const s=new Scene({limit:2});s.host('旧场');s.nextTopic();s.host('新话题');s.add('viewer','新弹幕');assert.equal(s.entries.length,2)
 })

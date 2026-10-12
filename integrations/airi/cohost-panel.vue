@@ -183,9 +183,9 @@ async function send() {
   })
 }
 function message(entry: Entry) {
-  if (entry.role === 'director' && entry.reason === 'participation_error')
+  if (entry.role === 'director' && entry.reason === 'participation_error' && !entry.explanation)
     return t('decisionError')
-  if (entry.role === 'director' && entry.reason === 'participation_timeout')
+  if (entry.role === 'director' && entry.reason === 'participation_timeout' && !entry.explanation)
     return t('decisionTimeout')
   if (entry.role === 'director')
     return entry.explanation ?? decisions[entry.reason as keyof typeof decisions] ?? t('waiting')
