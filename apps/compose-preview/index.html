@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>小鲸鱼 · 头身拼接预览</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#e9f0f3;color:#183044;font:15px system-ui}main{display:grid;grid-template-columns:1fr 300px;height:100vh}#stage{min-width:0;position:relative;background:radial-gradient(ellipse at 50% 35%,#fff,#d7e4e9)}canvas{width:100%;height:100%;display:block}aside{overflow:auto;padding:22px;background:#fbfdff;border-left:1px solid #ccdbe3}h1{font-size:20px;margin:0 0 8px}p{font-size:13px;line-height:1.65;color:#577083}label{display:block;margin:15px 0;font-size:13px}input[type=range],select{width:100%;margin-top:8px}button,select{border:1px solid #c7d8e2;border-radius:9px;background:white;color:inherit;padding:9px}button{cursor:pointer;margin:3px}button.active{background:#caeef1}#status{position:absolute;left:20px;top:16px;padding:8px 12px;border-radius:10px;background:#ffffffcc;font-size:13px}details{margin:16px 0}summary{cursor:pointer}#layers{max-height:260px;overflow:auto;font:11px monospace}#layers label{margin:3px}footer{font-size:12px;color:#637c8e;margin-top:20px}@media(max-width:720px){main{grid-template-columns:1fr;height:auto}#stage{height:70vh}aside{border:0}}
+</style>
+<main><section id="stage"><div id="status">正在加载两个模型…</div></section><aside><h1>头身拼接预览</h1><p>原来的脸与表情 × 大肥鱼的身体。独立试验，不影响直播舞台。</p>
+<label>查看<select id="mode"><option value="compose">拼接效果</option><option value="old">原模型完整形象</option><option value="body">新模型完整形象</option></select></label>
+<div id="actions"><button data-action="idle">静止</button><button data-action="turn">转头</button><button data-action="sway">身体摆动</button><button data-action="talk">模拟说话</button><button data-action="smile">笑一下</button></div>
+<label>头部大小<input id="headScale" type="range" min="0.3" max="2" step="0.005" value="1"></label>
+<label>头部左右<input id="headX" type="range" min="-250" max="250" step="1" value="0"></label>
+<label>头部上下<input id="headY" type="range" min="-400" max="400" step="1" value="0"></label>
+<label>整体大小<input id="zoom" type="range" min="0.5" max="1.5" step="0.01" value="1"></label>
+<button id="reset">恢复预览初始值</button><button id="save">保存本机调整</button>
+<p id="hint">先看正面，再检查转头和摆动。脖子接缝与头发遮挡是本次验证重点。</p>
+<details><summary>图层检查</summary><label>模型<select id="layerModel"><option value="old">原头部</option><option value="body">新身体</option></select></label><div id="layers"></div></details>
+<footer>没有麦克风采集或 AI 调用。运行包拼接预览，尚未替换正式角色。</footer></aside></main>
+<script src="/core.js"></script><script type="module" src="/client.js"></script></html>
