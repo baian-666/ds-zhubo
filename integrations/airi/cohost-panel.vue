@@ -24,6 +24,8 @@ const entrySchema = v.object({
   explanation: v.optional(v.string()),
   reason: v.optional(v.string()),
   userId: v.optional(v.string()),
+  displayName: v.optional(v.string()),
+  real: v.optional(v.boolean()),
   status: v.optional(v.string()),
   motionLabel: v.optional(v.string()),
   error: v.optional(v.string()),
@@ -34,6 +36,15 @@ const statusSchema = v.object({
   busy: v.boolean(),
   muted: v.boolean(),
   hostSpeaking: v.boolean(),
+  bilibili: v.object({
+    configured: v.boolean(),
+    state: v.string(),
+    error: v.nullable(v.string()),
+    roomId: v.nullable(v.string()),
+    received: v.number(),
+    accepted: v.number(),
+    dropped: v.number(),
+  }),
   configuration: v.object({ model: v.string(), persona: v.string(), recognition: v.string(), speech: v.string(), voice: v.string() }),
   room: v.object({ session: v.string(), version: v.number(), entries: v.array(entrySchema) }),
   performance: v.unknown(),
@@ -71,6 +82,7 @@ const entries = computed(() => state.value?.room.entries.filter(entry => !proces
 const ready = computed(() => connected.value && state.value?.deepseekConfigured)
 const ownVoice = computed(() => state.value?.airi.active && state.value.airi.control === owner)
 const canStartVoice = computed(() => ready.value && state.value?.airi.configured && !state.value.airi.active && state.value.airi.stages.some(stage => stage.stage === props.stage && stage.ready))
+const biliActive = computed(() => ['connecting', 'connected', 'retrying'].includes(state.value?.bilibili.state ?? ''))
 const voiceLabel = computed(() => {
   const voice = state.value?.airi
   if (!voice?.configured)
@@ -182,6 +194,16 @@ async function send() {
       viewerText.value = ''
   })
 }
+async function toggleBilibili() {
+  await action(async () => {
+    if (biliActive.value) {
+      await api('bilibili/stop', {})
+      return
+    }
+    await api('live/start', {})
+    await api('bilibili/start', {})
+  })
+}
 function message(entry: Entry) {
   if (entry.role === 'director' && entry.reason === 'participation_error' && !entry.explanation)
     return t('decisionError')
@@ -242,7 +264,8 @@ onUnmounted(() => {
         </p>
         <article v-for="entry in entries" :key="`${state?.room.session}:${entry.id}`" :data-role="entry.role" :class="['my-3 flex flex-col gap-1', entry.role === 'host' ? 'items-end' : 'items-start']">
           <div :class="['flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400']">
-            <strong>{{ entry.role === 'host' ? t('host') : entry.role === 'viewer' ? entry.userId : t('cohost') }}</strong>
+            <strong>{{ entry.role === 'host' ? t('host') : entry.role === 'viewer' ? (entry.displayName || entry.userId) : t('cohost') }}</strong>
+            <span v-if="entry.role === 'viewer'">{{ entry.real ? t('biliViewer') : t('simulatedViewer') }}</span>
             <span v-if="entry.role === 'director'">{{ t('director') }}</span>
             <time>{{ new Date(entry.at).toLocaleTimeString([], { hour12: false }) }}</time>
           </div>
@@ -301,6 +324,16 @@ onUnmounted(() => {
         <p>{{ t('configDevice', { device: cohostInput.device || t('systemMicrophone') }) }} · {{ t('voiceTip') }}</p>
         <p>{{ t('configNote') }}</p>
         <p>{{ t('tip') }}</p>
+        <div data-bilibili :class="['mt-2 flex flex-col gap-2']">
+          <strong>{{ t('biliTitle') }} · {{ t(`bili_${state?.bilibili.state ?? 'disconnected'}`) }}</strong>
+          <span v-if="!state?.bilibili.configured">{{ t('biliMissing') }}</span>
+          <span v-if="state?.bilibili.error">{{ t(`biliError_${state.bilibili.error}`) }}</span>
+          <span v-if="state?.bilibili.roomId">{{ t('biliRoom', { room: state.bilibili.roomId }) }}</span>
+          <span>{{ t('biliCount', { accepted: state?.bilibili.accepted ?? 0, dropped: state?.bilibili.dropped ?? 0 }) }}</span>
+          <Button :disabled="sending || !connected || (!biliActive && !state?.bilibili.configured)" @click="toggleBilibili">
+            {{ biliActive ? t('biliStop') : t('biliStart') }}
+          </Button>
+        </div>
       </details>
     </div>
   </aside>

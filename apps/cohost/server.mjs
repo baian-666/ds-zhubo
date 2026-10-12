@@ -14,6 +14,7 @@ import { RoomJournal } from './room-journal.mjs'
 import { Scene } from './scene.mjs'
 import { Participation } from './participation.mjs'
 import { planParticipation } from './participation-model.mjs'
+import { BilibiliLive } from './bilibili.mjs'
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status }
@@ -52,7 +53,7 @@ function authorized(request, token) {
   return actual.length === expected.length && timingSafeEqual(actual, expected)
 }
 
-export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = process.env.DEEPSEEK_MODEL || 'deepseek-flash', token = process.env.COHOST_ACCESS_TOKEN || '', scheduler = new Scheduler(), director = new Director({ scheduler }), reply = streamReply, semanticEnabled = false, planner, participationOptions = {}, rehearsal = false, voiceOptions = {}, airiOptions = {}, roomSnapshot } = {}) {
+export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = process.env.DEEPSEEK_MODEL || 'deepseek-flash', token = process.env.COHOST_ACCESS_TOKEN || '', scheduler = new Scheduler(), director = new Director({ scheduler }), reply = streamReply, semanticEnabled = false, planner, participationOptions = {}, rehearsal = false, voiceOptions = {}, airiOptions = {}, bilibiliOptions = {}, roomSnapshot } = {}) {
   const histories = { deepseek: [], mock: [] }
   const room = new RoomJournal({snapshot:roomSnapshot})
   let initializing=true
@@ -66,6 +67,15 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       scene.add('assistant',result.text || '非语音回应',{engine:'deepseek',delivery:'reaction'})
     },
     plan:planner ?? (apiKey ? (snapshot, options) => planParticipation(snapshot, {...options, apiKey, model}) : null), enabled:semanticEnabled && Boolean(apiKey || planner) })
+  function acceptDanmaku(message) {
+    if(!scheduler.enqueue(message))return false
+    const fields={userId:message.userId,displayName:message.displayName,platform:message.platform,messageId:message.id,real:message.real===true}
+    scene.add('viewer',message.text,fields)
+    room.add('viewer',message.text,fields)
+    participation.notify()
+    return true
+  }
+  const bilibili=new BilibiliLive({...bilibiliOptions,onMessage:acceptDanmaku})
   function directorEvent(body) {
     const previousRevision = director.revision
     const result = director.event(body)
@@ -301,8 +311,11 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       if (path === '/healthz' && request.method === 'GET') { json(response, 200, { ok: true }); return }
       if (!path?.startsWith('/api/')) throw new HttpError(404, '未找到')
       if (!authorized(request, token)) throw new HttpError(401, '请填写正确的助播访问令牌')
+      if (request.method === 'GET' && path === '/api/bilibili/status') {
+        json(response,200,bilibili.status());return
+      }
       if (request.method === 'GET' && path === '/api/status') {
-        json(response, 200, { ...scheduler.status(), live, configuration:{provider:'DeepSeek', model, persona:'小鲸鱼', recognition:'FunAudioLLM/SenseVoiceSmall', speech:'FunAudioLLM/CosyVoice2-0.5B', voice:'claire'}, director: director.status(), participation:participation.status(), deepseekConfigured: Boolean(apiKey), model, persona:'小鲸鱼', voice:voice.snapshot(), airi:airi.snapshot(), performance:{...performance.snapshot({...scheduler.status(), thinking:participation.status().busy}),session:room.session}, room: room.status(), queue: scheduler.queue.map(({id,platform,userId,text,mentioned,selected,receivedAt}) => ({id,platform,userId,text,mentioned,selected,expiresAt:receivedAt + scheduler.ttlMs})), stage: '本机直播试播；AIRI 云端语音与口型，Windows 语音备用' })
+        json(response, 200, { ...scheduler.status(), live, bilibili:bilibili.status(), configuration:{provider:'DeepSeek', model, persona:'小鲸鱼', recognition:'FunAudioLLM/SenseVoiceSmall', speech:'FunAudioLLM/CosyVoice2-0.5B', voice:'claire'}, director: director.status(), participation:participation.status(), deepseekConfigured: Boolean(apiKey), model, persona:'小鲸鱼', voice:voice.snapshot(), airi:airi.snapshot(), performance:{...performance.snapshot({...scheduler.status(), thinking:participation.status().busy}),session:room.session}, room: room.status(), queue: scheduler.queue.map(({id,platform,userId,text,mentioned,selected,receivedAt}) => ({id,platform,userId,text,mentioned,selected,expiresAt:receivedAt + scheduler.ttlMs})), stage: '本机直播试播；AIRI 云端语音与口型，Windows 语音备用' })
         return
       }
       if (request.method !== 'POST') throw new HttpError(405, '请使用 POST')
@@ -310,6 +323,10 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       if (!request.headers['content-type']?.startsWith('application/json')) throw new HttpError(415, '需要 application/json')
       if (request.headers['sec-fetch-site'] === 'cross-site' && !localStage) throw new HttpError(403, '不接受跨站请求')
       const body = await readBody(request)
+      if (path === '/api/bilibili/start' || path === '/api/bilibili/stop') {
+        if(!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(request.socket.remoteAddress))throw new HttpError(403,'B站连接仅能在本机控制')
+        json(response,200,path.endsWith('/start')?bilibili.start():await bilibili.stop());return
+      }
       if (path === '/api/live/start') {
         if (!apiKey) throw new HttpError(503,'请先在本机 .env 配置 DeepSeek')
         if (!live || director.mode !== 'auto' || !director.viewerWindow || !participation.enabled) {
@@ -424,11 +441,8 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
           userId: textField(body.userId, 128), text: textField(body.text, 500),
           mentioned: body.mentioned === true, selected: body.selected === true,
         }
-        const accepted = scheduler.enqueue(message)
+        const accepted = acceptDanmaku(message)
         if (accepted) {
-          scene.add('viewer', message.text, {userId:message.userId, platform:message.platform, messageId:message.id})
-          participation.notify()
-          room.add('viewer', message.text, { userId: message.userId, platform: message.platform, messageId: message.id })
           const reason = director.mode === 'manual' ? 'viewer_manual_wait' :
             !director.viewerWindow ? 'viewer_window_closed' :
             scheduler.hostSpeaking ? 'viewer_host_speaking' :
@@ -482,7 +496,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
     }
   }, 100)
   tick.unref()
-  server.on('close', () => { clearInterval(tick); airi.stop(); voice.stop(); participation.close(); director.close() })
+  server.on('close', () => { clearInterval(tick); void bilibili.stop(); airi.stop(); voice.stop(); participation.close(); director.close() })
   return server
 }
 

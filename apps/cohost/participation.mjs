@@ -14,10 +14,11 @@ const errorMessages={
 }
 // One async planner beside the deterministic director. No serial second generation.
 export class Participation {
-  constructor({ director, scheduler, scene, plan, history = () => [], onReaction = () => {}, enabled = false, now = Date.now, debounceMs = 250, timeoutMs = 4500, opportunityMs = 6000, thoughtOptions = {} } = {}) {
+  constructor({ director, scheduler, scene, plan, history = () => [], onReaction = () => {}, enabled = false, now = Date.now, debounceMs = 250, timeoutMs = 4500, opportunityMs = 6000, viewerIntervalMs = 3000, thoughtOptions = {} } = {}) {
     Object.assign(this,{director,scheduler,scene,plan,history,onReaction,now,debounceMs,timeoutMs,opportunityMs})
     this.enabled = enabled; this.pending = false; this.job = null; this.timer = null
     this.observedUtterance = null; this.lastKey = null; this.closed = false; this.lastDecision = null
+    this.viewerIntervalMs=viewerIntervalMs;this.nextViewerAt=-Infinity
     this.thought=new PendingThought({...thoughtOptions,now})
     director.followUp={validate:id=>this.thought.snapshot(scene.topic)?.id===id,
       consume:id=>this.thought.take(id,scene.topic)}
@@ -68,10 +69,16 @@ export class Participation {
       this.scheduler.hostSpeaking || this.director.candidate || this.director.intent === 'stop') return
     const snapshot=this.context()
     if (!snapshot.hostOpportunity && !snapshot.eligibleViewers.length && !snapshot.pendingOpportunity) return
+    if(!snapshot.hostOpportunity && !snapshot.pendingOpportunity && this.now()<this.nextViewerAt)return
     const key=this.key(snapshot)
     if (key===this.lastKey) return
     if (this.job) {
-      if (key!==this.job.key) {this.pending=true;this.job.controller.abort()}
+      if (key!==this.job.key) {
+        this.pending=true
+        // New background messages join the next batch. Host/control changes still cancel immediately.
+        if(this.director.revision!==this.job.revision || this.scheduler.version!==this.job.version || snapshot.hostOpportunity || snapshot.pendingOpportunity)
+          this.job.controller.abort()
+      }
       return
     }
     if (this.timer) return
@@ -84,8 +91,11 @@ export class Participation {
       this.scheduler.hostSpeaking || this.director.candidate || this.director.intent==='stop' || this.job) return
     const snapshot=this.context(), key=this.key(snapshot)
     if ((!snapshot.hostOpportunity && !snapshot.eligibleViewers.length && !snapshot.pendingOpportunity) || key===this.lastKey) return
+    if(!snapshot.hostOpportunity && !snapshot.pendingOpportunity && this.now()<this.nextViewerAt)return
+    const viewerOnly=!snapshot.hostOpportunity && !snapshot.pendingOpportunity
+    if(viewerOnly)this.nextViewerAt=this.now()+this.viewerIntervalMs
     // At most one quiet review, even if the provider fails or the snapshot is interrupted.
-    const job={key,controller:new AbortController(),revision:this.director.revision,started:this.now(),thoughtId:snapshot.pendingOpportunity?snapshot.pendingThought.id:null}
+    const job={key,controller:new AbortController(),revision:this.director.revision,version:this.scheduler.version,started:this.now(),thoughtId:snapshot.pendingOpportunity?snapshot.pendingThought.id:null}
     this.job=job;this.lastKey=key;this.pending=false
     let timer
     try {
@@ -96,7 +106,7 @@ export class Participation {
         this.director.revision!==job.revision || this.director.candidate) return
       const elapsed=Math.max(0,this.now()-job.started)
       this.apply(result,snapshot,elapsed)
-      this.lastKey=this.key(this.context())
+      this.lastKey=viewerOnly?job.key:this.key(this.context())
     } catch (error) {
       if (!this.closed && (!job.controller.signal.aborted || job.timedOut) &&
         this.director.revision===job.revision) {

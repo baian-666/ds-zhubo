@@ -32,7 +32,8 @@ export class Scheduler {
     if (this.seen.has(key)) return false
     this.seen.set(key, this.now() + 120_000)
     if (this.seen.size > 4096) this.seen.delete(this.seen.keys().next().value)
-    this.queue.push({ ...message, receivedAt: this.now() })
+    const receivedAt=message.real && Number.isFinite(message.sourceAt) ? Math.min(this.now(),message.sourceAt) : this.now()
+    this.queue.push({ ...message, receivedAt })
     if (this.queue.length > 128) this.queue.shift()
     return true
   }
@@ -70,7 +71,7 @@ export class Scheduler {
     this.expirePlayback()
     this.prune()
     if (this.muted || this.hostSpeaking || this.active || this.now() - this.lastViewerReply < this.cooldownMs) return []
-    return this.queue.filter(item => (item.mentioned || item.selected) && !this.users.has(`${item.platform}:${item.userId}`))
+    return this.queue.filter(item => (item.mentioned || item.selected || item.real) && !this.users.has(`${item.platform}:${item.userId}`))
       .sort((a, b) => Number(Boolean(b.selected)) - Number(Boolean(a.selected)) || a.receivedAt - b.receivedAt)
   }
 
