@@ -1,3 +1,8 @@
+import type { Components, NativeExpression } from './whale-rig'
+
+// Node loads this shared contract directly and requires the source extension.
+import { componentAxes, componentBindings, handAxes, nativeExpressions } from './whale-rig.ts'
+
 /** Allowed normalized body controls. Speech owns mouth opening. */
 export const poseLimits = {
   eyeX: [-1, 1],
@@ -14,15 +19,15 @@ export const poseLimits = {
 
 export type PoseAxis = keyof typeof poseLimits
 export type SequencePose = Partial<Record<PoseAxis, number>>
-export type ExpressionName = 'smile' | 'think' | 'surprise' | 'pout'
+export type ExpressionName = 'smile' | 'think' | 'surprise' | 'pout' | NativeExpression
 export interface SequenceExpression { name: ExpressionName, strength: number }
-export interface MotionFrame { ms: number, holdMs?: number, pose: SequencePose, expression?: SequenceExpression }
+export interface MotionFrame { ms: number, holdMs?: number, pose: SequencePose, expression?: SequenceExpression, components?: Components }
 /** A short, transient performance. Each frame has a transition and a separate hold. */
 export interface MotionSequence { label: string, frames: MotionFrame[] }
 
 export const defaultHoldMs = 800
 
-const expressionNames = ['smile', 'think', 'surprise', 'pout']
+const expressionNames = ['smile', 'think', 'surprise', 'pout', ...nativeExpressions]
 const axes = Object.keys(poseLimits) as PoseAxis[]
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -48,7 +53,7 @@ export function parseMotionSequence(value: unknown): MotionSequence | null {
   let duration = 0
   let transitions = 0
   for (const frame of value.frames) {
-    if (!object(frame) || Object.keys(frame).some(key => !['ms', 'holdMs', 'pose', 'expression'].includes(key))
+    if (!object(frame) || Object.keys(frame).some(key => !['ms', 'holdMs', 'pose', 'expression', 'components'].includes(key))
       || !within(frame.ms, 200, 1800) || !Number.isInteger(frame.ms) || !object(frame.pose)) {
       return null
     }
@@ -62,6 +67,23 @@ export function parseMotionSequence(value: unknown): MotionSequence | null {
       if (!within(amount, poseLimits[axis][0], poseLimits[axis][1]))
         return null
       pose[axis] = amount
+    }
+    let components: Components | undefined
+    if (frame.components !== undefined) {
+      if (!object(frame.components))
+        return null
+      components = {}
+      for (const [key, amount] of Object.entries(frame.components)) {
+        if (!Object.hasOwn(componentBindings, key))
+          return null
+        const axis = key as keyof Components
+        const binding = componentBindings[axis]
+        if (!within(amount, binding.min < 0 ? -1 : 0, 1) || (binding.switch && amount !== 0 && amount !== 1))
+          return null
+        components[axis] = amount
+      }
+      if (handAxes.filter(axis => components?.[axis] === 1).length > 1 || (components.draw === 1 && components.erase === 1))
+        return null
     }
     let expression: SequenceExpression | undefined
     if (frame.expression !== undefined) {
@@ -77,7 +99,7 @@ export function parseMotionSequence(value: unknown): MotionSequence | null {
     duration += frame.ms + (frame.holdMs as number | undefined ?? defaultHoldMs)
     if (transitions > 4000 || duration > 10000)
       return null
-    frames.push({ ms: frame.ms, ...(frame.holdMs !== undefined ? { holdMs: frame.holdMs as number } : {}), pose, ...(expression ? { expression } : {}) })
+    frames.push({ ms: frame.ms, ...(frame.holdMs !== undefined ? { holdMs: frame.holdMs as number } : {}), pose, ...(expression ? { expression } : {}), ...(components ? { components } : {}) })
   }
   return { label: value.label.trim(), frames }
 }
@@ -97,10 +119,25 @@ export function sequenceDuration(sequence: MotionSequence): number {
 export function sampleMotionSequence(sequence: MotionSequence, elapsedMs: number) {
   let previous: SequencePose = {}
   let expression: SequenceExpression | undefined
+  let previousComponents: Components = {}
   let elapsed = Math.max(0, elapsedMs)
   for (const [step, frame] of sequence.frames.entries()) {
     const target = { ...previous, ...frame.pose }
     const nextExpression = frame.expression ?? expression
+    const targetComponents = { ...previousComponents, ...frame.components }
+    const newHand = handAxes.find(axis => frame.components?.[axis] === 1)
+    if (newHand) {
+      for (const axis of handAxes)
+        targetComponents[axis] = axis === newHand ? 1 : 0
+    }
+    else if (handAxes.some(axis => frame.components?.[axis] === 0) && !handAxes.some(axis => targetComponents[axis] === 1) && frame.components?.orderBoard !== 0) {
+      // Lowering a special hand returns to the normal hand; explicit orderBoard=0 can hide it.
+      targetComponents.orderBoard = 1
+    }
+    if (frame.components?.draw === 1)
+      targetComponents.erase = 0
+    if (frame.components?.erase === 1)
+      targetComponents.draw = 0
     const frameDuration = frame.ms + (frame.holdMs ?? defaultHoldMs)
     if (elapsed < frameDuration) {
       const progress = Math.min(1, elapsed / frame.ms)
@@ -109,6 +146,14 @@ export function sampleMotionSequence(sequence: MotionSequence, elapsedMs: number
       for (const axis of axes)
         pose[axis] = (previous[axis] ?? 0) + ((target[axis] ?? 0) - (previous[axis] ?? 0)) * ease
       let sampledExpression: SequenceExpression | undefined
+      const components: Components = {}
+      for (const axis of componentAxes) {
+        if (targetComponents[axis] === undefined)
+          continue
+        const from = previousComponents[axis] ?? componentBindings[axis].neutral
+        const to = targetComponents[axis] ?? from
+        components[axis] = componentBindings[axis].switch ? (progress < 0.5 ? from : to) : from + (to - from) * ease
+      }
       if (nextExpression) {
         if (!expression || expression.name === nextExpression.name) {
           const from = expression?.strength ?? 0
@@ -120,13 +165,14 @@ export function sampleMotionSequence(sequence: MotionSequence, elapsedMs: number
             : { name: nextExpression.name, strength: nextExpression.strength * (ease * 2 - 1) }
         }
       }
-      return { pose, expression: sampledExpression, step: step + 1, finished: false }
+      return { pose, expression: sampledExpression, components, step: step + 1, finished: false }
     }
     elapsed -= frameDuration
     previous = target
     expression = nextExpression
+    previousComponents = targetComponents
   }
-  return { pose: {} as SequencePose, expression: undefined, step: sequence.frames.length, finished: true }
+  return { pose: {} as SequencePose, expression: undefined, components: {} as Components, step: sequence.frames.length, finished: true }
 }
 
 /** Describes exactly the controls accepted by parseMotionSequence for model tool calling. */
@@ -152,6 +198,11 @@ export const motionSequenceSchema = {
             type: 'object',
             properties: { name: { type: 'string', enum: expressionNames }, strength: { type: 'number', minimum: 0, maximum: 1 } },
             required: ['name', 'strength'],
+            additionalProperties: false,
+          },
+          components: {
+            type: 'object',
+            properties: Object.fromEntries(componentAxes.map(axis => [axis, { type: 'number', minimum: componentBindings[axis].min < 0 ? -1 : 0, maximum: 1, ...(componentBindings[axis].switch ? { enum: [0, 1] } : {}), description: componentBindings[axis].description }])),
             additionalProperties: false,
           },
         },

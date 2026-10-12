@@ -26,8 +26,9 @@ if(existsSync(localModel)) {
 }
 const destination=join(vendor,'apps/stage-web/src/cohost')
 mkdirSync(destination,{recursive:true})
-for(const name of ['cohost-contract.ts','cohost-parent.ts','use-cohost-performance.ts','motion-sequence.ts']) {
-  const source=readFileSync(join(root,'integrations/airi',name))
+for(const name of ['cohost-contract.ts','cohost-parent.ts','use-cohost-performance.ts','motion-sequence.ts','whale-rig.ts','rig-controller.ts']) {
+  // Node requires source extensions; Vite/tsc resolve the renderer's extensionless imports.
+  const source=Buffer.from(readFileSync(join(root,'integrations/airi',name),'utf8').replaceAll("from './whale-rig.ts'", "from './whale-rig'"))
   const path=join(destination,name)
   // Owned overlay files can be updated only when they match the previous installation.
   const saved=join(root,'data/airi-overlay',name)
@@ -35,6 +36,8 @@ for(const name of ['cohost-contract.ts','cohost-parent.ts','use-cohost-performan
   if(!existsSync(path) || !readFileSync(path).equals(source)) writeFileSync(path,source)
   mkdirSync(join(root,'data/airi-overlay'),{recursive:true});writeFileSync(saved,source)
 }
+const rigPatch=spawnSync(process.execPath,[join(root,'scripts/patch-rig.mjs')],{cwd:root,stdio:'inherit'})
+if(rigPatch.status!==0)throw new Error('Shared rig overlay failed')
 const app=join(vendor,'apps/stage-web/src/App.vue')
 let source=readFileSync(app,'utf8')
 const anchor="import { usePWAStore } from './stores/pwa'"

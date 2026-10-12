@@ -24,7 +24,7 @@ writeFileSync(voiceFixture,Buffer.concat([header,padding,pcm]))
 const audio=readFileSync(new URL('../data/siliconflow-voice-trial.wav',import.meta.url))
 const real=process.argv.includes('--real')
 const freeMotion=process.argv.includes('--free-motion')
-const motion={label:'边说边动',frames:[{ms:1200,pose:{eyeX:-0.6,headZ:-0.25},expression:{name:'smile',strength:0.6}},{ms:1200,pose:{eyeX:0.4,headZ:0.3}},{ms:1200,pose:{eyeX:0,headZ:0}}]}
+const motion={label:'边说边动',frames:[{ms:1200,pose:{eyeX:-0.6,headZ:-0.25},expression:{name:'星星眼',strength:0.6},components:{tailBase:0.3,orderX:0.25}},{ms:1200,pose:{eyeX:0.4,headZ:0.3},components:{tailBase:-0.3}},{ms:1200,pose:{eyeX:0,headZ:0},components:{tailBase:0}}]}
 if(real && (!process.env.DEEPSEEK_API_KEY || !process.env.SILICONFLOW_API_KEY))throw Error('Configure local model and speech credentials first')
 const calls=[]
 const server=createApp({apiKey:real ? process.env.DEEPSEEK_API_KEY : 'test-only',semanticEnabled:real,token:'',rehearsal:true,
@@ -60,7 +60,7 @@ await context.route('http://127.0.0.1:8787/api/airi/stage/**',async route=>{
 })
 const result={kind:real ? 'Synthetic microphone, real AIRI pipeline and real cloud providers. No human microphone.' : 'AIRI native VAD, transcription adapter and audio playback with synthetic microphone and mocked cloud'}
 try {
-  await page.goto(base)
+  await page.goto(base+'/?debug')
   await page.locator('#voiceStage').selectOption('web')
   await page.locator('#voiceStart').waitFor()
   await page.waitForFunction(()=>!document.querySelector('#voiceStart').disabled,null,{timeout:15000})
@@ -88,14 +88,15 @@ try {
     let scene=element.__vueParentComponent;while(scene&&scene.type.__name!=='Live2D')scene=scene.parent
     const raw=scene.devtoolsRawSetupState.live2dModelRef.value.$.devtoolsRawSetupState
     const core=raw.model.value.internalModel.coreModel
-    const samples=[],rendered=[],moving=[]
-    for(let i=0;i<20;i++){samples.push(useSpeakingStore().mouthOpenSize);rendered.push(core.getParameterValueById('ParamMouthOpenY'));moving.push(document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('live2d-motion-control').control.active);await new Promise(r=>setTimeout(r,25))}
-    return {max:Math.max(...samples),renderedMax:Math.max(...rendered),speaking:useSpeakingStore().nowSpeaking,simultaneous:rendered.some((value,index)=>value>0 && moving[index])}
+    const samples=[],rendered=[],moving=[],tails=[]
+    for(let i=0;i<20;i++){samples.push(useSpeakingStore().mouthOpenSize);rendered.push(core.getParameterValueById('ParamMouthOpenY'));moving.push(document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('live2d-motion-control').control.active);tails.push(Math.abs(core.getParameterValueById('Param_Angle_Rotation_1_B_tail3')));await new Promise(r=>setTimeout(r,25))}
+    return {max:Math.max(...samples),renderedMax:Math.max(...rendered),tailMax:Math.max(...tails),speaking:useSpeakingStore().nowSpeaking,simultaneous:rendered.some((value,index)=>value>0 && moving[index]),componentSimultaneous:rendered.some((value,index)=>value>0&&tails[index]>0.01)}
   },module)
   assert.equal(result.mouthDuring.speaking,true)
   assert.ok(result.mouthDuring.max>0,'actual audio must drive lip sync')
   assert.ok(result.mouthDuring.renderedMax>0,'the loaded model mouth must move')
   if(freeMotion)assert.equal(result.mouthDuring.simultaneous,true,'free body movement and audio lip sync must coexist')
+  if(freeMotion)assert.equal(result.mouthDuring.componentSimultaneous,true,'tail component and audio lip sync must coexist')
   const interruptedAt=Date.now()
   await page.locator('#interrupt').click()
   await frame.waitForFunction(async path=>!(await import(path)).useSpeakingStore().nowSpeaking,module,{timeout:3000})

@@ -18,10 +18,13 @@ function install(relative, contents) {
   if (!existsSync(destination) || !readFileSync(destination).equals(contents)) writeFileSync(destination, contents)
   writeFileSync(saved, contents)
 }
-for (const name of ['cohost-contract.ts','use-cohost-performance.ts','cohost-desktop.ts','motion-sequence.ts','motion-sequence.test.ts'])
-  install('src/renderer/cohost/' + name, readFileSync(join(root,'integrations/airi',name)))
-for (const name of ['cohost-contract.ts','desktop-main.ts','motion-sequence.ts'])
-  install('src/cohost/' + name, readFileSync(join(root,'integrations/airi',name)))
+function rigSource(name) {
+  return Buffer.from(readFileSync(join(root,'integrations/airi',name),'utf8').replaceAll("from './whale-rig.ts'", "from './whale-rig'"))
+}
+for (const name of ['cohost-contract.ts','use-cohost-performance.ts','cohost-desktop.ts','motion-sequence.ts','motion-sequence.test.ts','whale-rig.ts','rig-controller.ts'])
+  install('src/renderer/cohost/' + name, rigSource(name))
+for (const name of ['cohost-contract.ts','desktop-main.ts','motion-sequence.ts','whale-rig.ts'])
+  install('src/cohost/' + name, rigSource(name))
 function hook(relative, anchor, replacement) {
   const destination = join(appRoot,relative)
   let text = readFileSync(destination,'utf8')

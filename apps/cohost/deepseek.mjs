@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { STREAM_PERFORMANCE_PROMPT } from './performance-prompt.mjs'
 const persona = readFileSync(new URL('./personas/xiaojingyu.md', import.meta.url), 'utf8')
 
 export const SYSTEM_PROMPT = persona + `
@@ -53,7 +54,7 @@ export async function* streamReply({ apiKey, model = 'deepseek-flash', history =
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model,
-      messages: [{ role: 'system', content: SYSTEM_PROMPT + '\n本机可执行你自己编排的 Live2D 表演。先立即输出可说的第一句，再按情境可选输出一次 <act>紧凑JSON</act>，之后继续正文。JSON 格式 {\"label\":\"简短中文动作名\",\"frames\":[{\"ms\":600,\"pose\":{\"eyeX\":0.3,\"headZ\":0.15},\"expression\":{\"name\":\"smile\",\"strength\":0.6}}]}。这是格式示例，不要照抄动作。自行安排1–3段，最多4段、过渡总长最多4000ms、加停留总长最多10000ms，每段ms为200–1800的整数，是过渡到目标的时长；每段可填holdMs(0–1800)，表示到位后停留，省略默认800ms。常用停留800–1400ms，让观众看清，不要短短一句反复换表情，通常1–2种足够。pose可控 eyeX/eyeY(-1到1，视线左右/上下)、headX/headY/headZ(-0.65到0.65，转头/抬低头/歪头)、bodyX/bodyY/bodyZ(-0.35到0.35)、eyeSquint(0到0.8)、mouthForm(-0.8到0.8)。只填改变的部分，其余延续前段；末尾自动恢复。expression可省略，name只允许smile/think/surprise/pout，strength为0到1。只使用这些字段，嘴巴开合由语音控制。按此刻情绪组合小幅度动作，不每次都表演。当主播请你表演时，用 act 实际提交一段自由动作，别只在台词里描述或声称已经动了。只用已开放的视线、头、身体和表情，尾巴、挥手等未开放部位不能声称被控制。标记由程序隐藏，不解释它；其他部分保持一两句口语。' }, ...history, { role: 'user', content: JSON.stringify(scene.length ? {...input, liveScene:scene} : input) }],
+      messages: [{ role: 'system', content: SYSTEM_PROMPT + STREAM_PERFORMANCE_PROMPT }, ...history, { role: 'user', content: JSON.stringify(scene.length ? {...input, liveScene:scene} : input) }],
       stream: true,
       thinking: { type: 'disabled' },
       max_tokens: 640,

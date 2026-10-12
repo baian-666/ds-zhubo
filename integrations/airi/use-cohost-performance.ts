@@ -14,6 +14,7 @@ import * as v from 'valibot'
 
 import { channel, commandEvent, commandSchema, receiptEvent } from './cohost-contract'
 import { sampleMotionSequence } from './motion-sequence'
+import { RigController } from './rig-controller'
 
 /**
  * Runs transient poses for the local rehearsal iframe. No model credentials cross this boundary.
@@ -39,77 +40,12 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
   let owned = false
   let modelImporting = false
 
-  let expressionModel = ''
-  let expressionEntries = expressions.expressions
-  let expressionName: Command['name'] = 'idle'
+  const rig = new RigController(expressions)
   let nativeExpression = ''
-  let expressionStrength = 0
-  const expressionBlocked = new Set<string>()
-  const expressionWrites = new Map<string, { previous: number, written: number }>()
-
-  function restoreExpression() {
-    // Restore only our writes on the same loaded model; keep user edits.
-    if (expressionModel === expressions.modelId && expressionEntries === expressions.expressions) {
-      for (const [id, value] of expressionWrites) {
-        const entry = expressions.expressions.get(id)
-        if (entry?.currentValue === value.written)
-          expressions.set(id, value.previous)
-      }
-    }
-    nativeExpression = ''
-    expressionWrites.clear()
-    expressionName = 'idle'
-    expressionStrength = 0
-    expressionBlocked.clear()
-  }
-
-  function applyExpression(name: Command['name'], strength = 1) {
-    const same = name === expressionName && expressionModel === expressions.modelId && expressionEntries === expressions.expressions
-    if (same && strength === expressionStrength)
-      return
-    if (!same) {
-      restoreExpression()
-      expressionBlocked.clear()
-      expressionModel = expressions.modelId
-      expressionEntries = expressions.expressions
-      expressionName = name
-    }
-    expressionStrength = strength
-    const signature = [['问号', 'ParamCheek74'], ['感叹号', 'ParamCheek75'], ['开心兴奋', 'ParamCheek76'], ['生气', 'ParamCheek80']]
-    if (!signature.every(([group, id]) => expressions.expressionGroups.get(group)?.parameters.some(parameter => parameter.parameterId === id)))
-      return
-    const groups: Partial<Record<Command['name'], string>> = { think: '问号', smile: '开心兴奋', surprise: '感叹号', pout: '生气' }
-    const groupName = groups[name]
-    const group = groupName && expressions.expressionGroups.get(groupName)
-    if (!group)
-      return
-    nativeExpression = groupName
-    for (const parameter of group.parameters) {
-      if (parameter.parameterId === 'ParamMouthOpenY' || expressionBlocked.has(parameter.parameterId))
-        continue
-      const entry = expressions.expressions.get(parameter.parameterId)
-      if (!entry)
-        continue
-      const previousWrite = expressionWrites.get(parameter.parameterId)
-      if (previousWrite && entry.currentValue !== previousWrite.written) {
-        // An operator changed this parameter during the transition. Keep their value.
-        expressionWrites.delete(parameter.parameterId)
-        expressionBlocked.add(parameter.parameterId)
-        continue
-      }
-      const previous = previousWrite?.previous ?? entry.currentValue
-      let written = previous + (parameter.value - previous) * strength
-      // This rig replaces the normal eyes. Fractional values show both eye drawings.
-      // Keep this switch discrete while brows and poses retain their requested strength.
-      if (name === 'smile' && parameter.parameterId === 'ParamCheek76')
-        written = strength > 0 ? parameter.value : previous
-      expressionWrites.set(parameter.parameterId, { previous, written })
-      expressions.set(parameter.parameterId, written)
-    }
-  }
 
   function release() {
-    restoreExpression()
+    rig.restore()
+    nativeExpression = ''
     if (!owned)
       return
     motion.release(owner)
@@ -138,7 +74,8 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
         motion.claimExclusiveControl(owner)
         owned = true
       }
-      applyExpression(sample?.expression?.name ?? (sample ? 'idle' : name), sample?.expression?.strength ?? 1)
+      const basicExpression = ['smile', 'think', 'surprise', 'pout'].includes(name) ? { name: name as 'smile' | 'think' | 'surprise' | 'pout', strength: 1 } : undefined
+      nativeExpression = rig.apply(sample ? sample.expression : basicExpression, sample ? sample.components : {})
       const pose = { ...neutralLive2DMotionControlPose }
       const wave = Math.sin(now / 230)
       if (name === 'listen') {
