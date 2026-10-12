@@ -13,6 +13,8 @@ export class Scheduler {
     this.hostSpeaking = false
     this.muted = false
     this.version = 0
+    this.lastCompletedTurn = null
+    this.lastCompletedAt = -Infinity
     this.playbackTimeoutMs = playbackTimeoutMs
     this.onDelivered = () => {}
   }
@@ -110,6 +112,7 @@ export class Scheduler {
     } else {
       turn.playedChars = turn.answer.length
       this.commitPlayed(turn)
+      this.lastCompletedTurn=turn.id;this.lastCompletedAt=this.now()
       this.active = null
     }
   }
@@ -143,6 +146,7 @@ export class Scheduler {
       if (event === 'ended' && (!turn.generationDone || playedChars !== turn.answer.length)) return false
       turn.playedChars = playedChars
       if (['ended', 'stopped', 'error'].includes(event)) {
+        if(event==='ended'){this.lastCompletedTurn=turn.id;this.lastCompletedAt=this.now()}
         this.interrupt()
         return true
       }

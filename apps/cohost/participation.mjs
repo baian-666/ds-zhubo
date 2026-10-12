@@ -1,4 +1,5 @@
 import { normalizePerformance, ParticipationError } from './participation-model.mjs'
+import { PendingThought } from './pending-thought.mjs'
 const errorMessages={
   network:'这次没有连上模型服务，我先听着；下一句再试。',
   timeout:'这次模型回应超时，我先听着；下一句再试。',
@@ -13,44 +14,60 @@ const errorMessages={
 }
 // One async planner beside the deterministic director. No serial second generation.
 export class Participation {
-  constructor({ director, scheduler, scene, plan, history = () => [], onReaction = () => {}, enabled = false, now = Date.now, debounceMs = 250, timeoutMs = 4500, opportunityMs = 6000 } = {}) {
+  constructor({ director, scheduler, scene, plan, history = () => [], onReaction = () => {}, enabled = false, now = Date.now, debounceMs = 250, timeoutMs = 4500, opportunityMs = 6000, thoughtOptions = {} } = {}) {
     Object.assign(this,{director,scheduler,scene,plan,history,onReaction,now,debounceMs,timeoutMs,opportunityMs})
     this.enabled = enabled; this.pending = false; this.job = null; this.timer = null
     this.observedUtterance = null; this.lastKey = null; this.closed = false; this.lastDecision = null
+    this.thought=new PendingThought({...thoughtOptions,now})
+    director.followUp={validate:id=>this.thought.snapshot(scene.topic)?.id===id,
+      consume:id=>this.thought.take(id,scene.topic)}
     director.semanticViewer = enabled
   }
-  status() { return { enabled:this.enabled, configured:Boolean(this.plan), busy:Boolean(this.job || this.timer), lastDecision:this.lastDecision } }
+  status() {
+    this.discardIfPaused()
+    return { enabled:this.enabled, configured:Boolean(this.plan), busy:Boolean(this.job || this.timer), lastDecision:this.lastDecision, pendingThought:this.thought.snapshot(this.scene.topic) }
+  }
+  discardIfPaused() {
+    if(this.closed || !this.enabled || this.director.mode!=='auto' || this.scheduler.muted || this.director.intent==='stop')this.thought.clear()
+  }
   setEnabled(value) {
     if (value && !this.plan) { const error=new Error('本机未配置自主参与模型'); error.status=503; throw error }
     this.enabled=value; this.director.semanticViewer=value
+    this.thought.clear()
     this.director.consumedUtterance=this.director.utterance?.id ?? null
     this.invalidate(); this.director.invalidate('participation_changed')
     this.lastKey=null; this.notify()
   }
-  invalidate() {
+  invalidate({clearThought=false}={}) {
     clearTimeout(this.timer); this.timer=null; this.pending=false
     this.job?.controller.abort()
+    if(clearThought)this.thought.clear()
   }
   context() {
+    this.discardIfPaused()
     const {director:d,scheduler:s}=this
     const u=d.utterance
     const hostOpportunity=Boolean(u?.final && u.endedAt !== null && u.id !== d.consumedUtterance && u.id !== this.observedUtterance && !['stop','backchannel'].includes(d.intent) &&
       this.now()-u.endedAt < this.opportunityMs)
     const eligibleViewers=d.viewerWindow ? s.eligibleViewers() : []
-    return { scene:this.scene.snapshot(), currentTopic:this.scene.topic, history:this.history().map(x=>({...x})), hostOpportunity, latestHost:u ? {...u} : null,
+    const snapshot={ scene:this.scene.snapshot(), currentTopic:this.scene.topic, history:this.history().map(x=>({...x})), hostOpportunity, latestHost:u ? {...u} : null,
       proactiveCooldownMs:Math.max(0,d.participationCooldownMs-(this.now()-d.lastParticipation)),
-      viewerWindow:d.viewerWindow, active:Boolean(s.active), hostSpeaking:s.hostSpeaking,
+      viewerWindow:d.viewerWindow, active:Boolean(s.active), activeTurn:s.active?.id??null, completedTurn:s.lastCompletedTurn,completedAt:Number.isFinite(s.lastCompletedAt)?s.lastCompletedAt:null,hostSpeaking:s.hostSpeaking,
       eligibleViewers:eligibleViewers.slice(0,16).map(({id,platform,userId,text})=>({id,platform,userId,text})) }
+    snapshot.pendingThought=this.thought.snapshot(this.scene.topic)
+    snapshot.pendingOpportunity=this.thought.ready({topic:this.scene.topic,...snapshot})
+    return snapshot
   }
   key(snapshot) {
     return JSON.stringify([this.director.revision,this.scheduler.version,
-      snapshot.hostOpportunity ? [] : snapshot.eligibleViewers.map(x=>[x.platform,x.id]),snapshot.hostOpportunity])
+      snapshot.hostOpportunity ? [] : snapshot.eligibleViewers.map(x=>[x.platform,x.id]),snapshot.hostOpportunity,snapshot.pendingOpportunity?snapshot.pendingThought.id:null])
   }
   notify() {
+    this.discardIfPaused()
     if (this.closed || !this.enabled || !this.plan || this.director.mode !== 'auto' || this.scheduler.muted ||
       this.scheduler.hostSpeaking || this.director.candidate || this.director.intent === 'stop') return
     const snapshot=this.context()
-    if (!snapshot.hostOpportunity && !snapshot.eligibleViewers.length) return
+    if (!snapshot.hostOpportunity && !snapshot.eligibleViewers.length && !snapshot.pendingOpportunity) return
     const key=this.key(snapshot)
     if (key===this.lastKey) return
     if (this.job) {
@@ -62,11 +79,13 @@ export class Participation {
     this.timer.unref?.()
   }
   async run() {
+    this.discardIfPaused()
     if (this.closed || !this.enabled || this.director.mode!=='auto' || this.scheduler.muted ||
       this.scheduler.hostSpeaking || this.director.candidate || this.director.intent==='stop' || this.job) return
     const snapshot=this.context(), key=this.key(snapshot)
-    if ((!snapshot.hostOpportunity && !snapshot.eligibleViewers.length) || key===this.lastKey) return
-    const job={key,controller:new AbortController(),revision:this.director.revision,started:this.now()}
+    if ((!snapshot.hostOpportunity && !snapshot.eligibleViewers.length && !snapshot.pendingOpportunity) || key===this.lastKey) return
+    // At most one quiet review, even if the provider fails or the snapshot is interrupted.
+    const job={key,controller:new AbortController(),revision:this.director.revision,started:this.now(),thoughtId:snapshot.pendingOpportunity?snapshot.pendingThought.id:null}
     this.job=job;this.lastKey=key;this.pending=false
     let timer
     try {
@@ -87,24 +106,32 @@ export class Participation {
       }
     } finally {
       clearTimeout(timer)
+      if(job.thoughtId && this.thought.value?.id===job.thoughtId)this.thought.value.reviewed=true
       if(this.job===job)this.job=null
       if(this.pending){this.pending=false;this.notify()}
     }
   }
   apply(result,snapshot,decisionMs) {
     const d=this.director,s=this.scheduler,u=d.utterance
-    if (!result || !['wait','reply_host','reply_viewer','react','stop'].includes(result.action) ||
+    if (!result || !['wait','reply_host','reply_viewer','reply_followup','react','stop'].includes(result.action) ||
       typeof result.reason!=='string' || !result.reason.trim() || result.reason.length>180 ||
       typeof result.text!=='string' || result.text.length>800) throw new Error('Invalid action')
     const animation=normalizePerformance(result)
     result={...result,...animation,warnings:[...(result.warnings??[]),...animation.warnings]}
     if (result.warnings.length) d.record('hold','performance_adjusted',{
       explanation:result.warnings.includes('motion_dropped') || result.warnings.includes('performance_dropped') || result.warnings.includes('components_dropped')
-        ? '这次动作有一部分不合规，已略过；接话照常。' : '动作字段的位置已校正，按安全范围执行。',
+        ? '这次动作有一部分不合规，已略过；接话照常。' : result.warnings.includes('thought_dropped') ? '这次便签格式不合规，已略过；原来的决定照常。' : '动作字段的位置已校正，按安全范围执行。',
       performanceWarnings:result.warnings})
     if (snapshot.hostOpportunity && u?.id === snapshot.latestHost?.id) this.observedUtterance=u.id
     const details={explanation:result.reason,decisionMs}
     this.lastDecision={action:result.action,reason:result.reason,decisionMs,at:this.now()}
+    if(snapshot.pendingThought && (snapshot.hostOpportunity || snapshot.pendingOpportunity)) {
+      if(result.action!=='reply_followup')this.thought.take(snapshot.pendingThought.id,this.scene.topic)
+    }
+    if(['wait','react'].includes(result.action) && result.thought && snapshot.hostOpportunity && !snapshot.pendingOpportunity) {
+      if(this.thought.set(result.thought,{topic:this.scene.topic,utterance:u.id,active:snapshot.active,activeTurn:snapshot.activeTurn}))
+        d.record('hold','participation_deferred',{explanation:'我先记着这个想法：'+this.thought.value.text})
+    }
     if(result.action==='wait') {d.record('hold','participation_wait',details);return}
     if(result.action==='react') {
       if(!snapshot.hostOpportunity || !u || this.now()-u.endedAt>=this.opportunityMs || s.active || result.text.length>40 || this.now()-d.lastParticipation<d.participationCooldownMs)return
@@ -114,10 +141,19 @@ export class Participation {
     }
     if(result.action==='stop') {
       if(!snapshot.hostOpportunity || !s.active || !u || this.now()-u.endedAt>=this.opportunityMs)return
-      s.interrupt();d.consumedUtterance=u.id;d.intent='stop';d.candidate=null
+      s.interrupt();this.thought.clear();d.consumedUtterance=u.id;d.intent='stop';d.candidate=null
       d.record('stop','participation_stop',details);return
     }
     if(!result.text.trim())return
+    if(result.action==='reply_followup') {
+      const thought=this.thought.snapshot(this.scene.topic)
+      if(!snapshot.pendingOpportunity || !thought || result.thoughtId!==thought.id || thought.id!==snapshot.pendingThought?.id ||
+        result.hostIntent!=='spontaneous' || s.active || s.hostSpeaking || !u?.final || u.id!==thought.utterance ||
+        this.now()-d.lastParticipation<d.participationCooldownMs) {this.thought.clear();return}
+      d.candidate={id:++d.nextDecision,revision:d.revision,text:u.text,intent:'opportunity',thoughtId:thought.id,
+        expiresAt:Math.min(this.now()+1500,thought.expiresAt),preparedReply:result.text,performance:result.performance,motion:result.motion,decisionMs}
+      d.record('reply','participation_followup',details);return
+    }
     if(result.action==='reply_host') {
       if(!snapshot.hostOpportunity || !u?.final || u.endedAt===null || u.id===d.consumedUtterance ||
         this.now()-u.endedAt>=this.opportunityMs)return
@@ -140,5 +176,5 @@ export class Participation {
     }
     d.record('reply','participation_reply',details)
   }
-  close() {this.closed=true;this.invalidate()}
+  close() {this.closed=true;this.invalidate({clearThought:true})}
 }

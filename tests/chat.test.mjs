@@ -43,6 +43,14 @@ test('local display recovery preserves bubbles without reviving audio, old utter
  await (await r.post('reply',{source:'host',engine:'deepseek',text:'新发言'})).text();assert.equal(calls,1)
  assert.throws(()=>new RoomJournal({snapshot:{entries:[{id:1,role:'unknown',text:''}]}}))
 })
+
+test('restoring a full display does not evict messages for startup mode records',async t=>{
+ const original=new RoomJournal()
+ for(let n=0;n<300;n++)original.add('host','本机显示 '+n)
+ const r=await serve(t,{roomSnapshot:original.status(),rehearsal:true})
+ const state=await r.state();assert.equal(state.room.entries.length,300);assert.equal(state.room.entries[0].text,'本机显示 0')
+ assert.equal(state.room.entries.every(entry=>entry.restored),true)
+})
 test('host comes before director, duplicate final is ignored, and streaming reply updates one bubble', async t => {
   const r = await serve(t, { reply: async function* () { yield '第一段'; yield '第二段' } })
   await r.post('director/event', { type: 'mode', value: 'auto' })

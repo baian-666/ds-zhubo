@@ -77,10 +77,14 @@ try {
   await page.locator('#voiceStart').click()
   await page.waitForFunction(()=>document.querySelector('.message.assistant')?.textContent.trim().length>0 || /失败/.test(document.querySelector('#voiceState').textContent),{},{timeout:90000})
   assert.equal(await page.locator('#voiceState').textContent().then(text=>text.includes('失败')),false)
-  await page.waitForFunction(()=>document.querySelector('.message.assistant .messageState')?.textContent.includes('播出完成'),{},{timeout:45000})
+  // The fixture can produce two VAD segments. A superseded bubble stays cancelled;
+  // validate the delivered turn rather than waiting forever for the first bubble.
+  await page.waitForFunction(()=>Array.from(document.querySelectorAll('.message.assistant .messageState')).some(element=>element.textContent.includes('播出完成')),{},{timeout:45000})
   result.state=await(await fetch(base+'/api/status')).json()
-  assert.equal(result.state.room.entries.filter(e=>e.role==='assistant').length,1)
-  assert.equal(result.state.room.entries.find(e=>e.role==='assistant').playedChars,result.state.room.entries.find(e=>e.role==='assistant').text.length)
+  const delivered=result.state.room.entries.findLast(e=>e.role==='assistant'&&e.delivery!=='reaction'&&e.status==='completed')
+  assert.ok(delivered,'the current utterance must complete actual playback')
+  assert.equal(delivered.playedChars,delivered.text.length)
+  assert.equal(result.state.busy,false)
   assert.ok(calls.some(c=>c.kind==='asr'));assert.ok(calls.some(c=>c.kind==='tts'))
   if(pauseTest){
     assert.ok(asrCalls>=2,'both pause-separated segments must reach recognition')

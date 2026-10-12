@@ -55,6 +55,7 @@ function authorized(request, token) {
 export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = process.env.DEEPSEEK_MODEL || 'deepseek-flash', token = process.env.COHOST_ACCESS_TOKEN || '', scheduler = new Scheduler(), director = new Director({ scheduler }), reply = streamReply, semanticEnabled = false, planner, participationOptions = {}, rehearsal = false, voiceOptions = {}, airiOptions = {}, roomSnapshot } = {}) {
   const histories = { deepseek: [], mock: [] }
   const room = new RoomJournal({snapshot:roomSnapshot})
+  let initializing=true
   const scene = new Scene()
   const performance = new Performance()
   let live = false
@@ -68,7 +69,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
   function directorEvent(body) {
     const previousRevision = director.revision
     const result = director.event(body)
-    if (director.revision !== previousRevision) participation.invalidate()
+    if (director.revision !== previousRevision) participation.invalidate({clearThought:['topic-change','mode','interrupt'].includes(body.type) || director.intent==='stop'})
     if (director.revision !== previousRevision && ['speech-start','topic-change','mode'].includes(body.type)) performance.clear()
     if (body.type === 'topic-change') scene.nextTopic()
     participation.notify()
@@ -90,13 +91,13 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       return accepted
     },
     onStop: () => {
-      participation.invalidate()
+      participation.invalidate({clearThought:true})
       director.reset('voice_stopped', {clearSpeech:true})
       if (scheduler.active?.voiceOwned) scheduler.interrupt()
     },
   })
   const airi = new AiriVoice({...airiOptions, onStop:() => {
-    participation.invalidate()
+    participation.invalidate({clearThought:true})
     director.reset('voice_stopped', {clearSpeech:true})
     if (scheduler.active?.airiRun) scheduler.interrupt()
   }})
@@ -108,6 +109,8 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
     return accepted
   }
   director.onRecord = entry => {
+    // Do not evict restored bubbles just to display the startup mode switches.
+    if(roomSnapshot && initializing)return
     if (entry.action === 'stop') performance.clear()
     if (entry.reason === 'needs_semantic_evidence' && participation.enabled) entry = {...entry, explanation:'我正在听这句话的意思，判断该接话还是继续等。'}
     const previous = room.entries.at(-1)
@@ -123,15 +126,19 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
     const engine = input.engine ?? 'deepseek'
     scene.add('assistant', answer, {engine})
     histories[engine] = [...histories[engine], { role: 'user', content: JSON.stringify(input) }, { role: 'assistant', content: answer }].slice(-12)
+    if(engine==='deepseek' && input.pendingThoughtId!==undefined)participation.thought.take(input.pendingThoughtId,scene.topic)
   }
   if (rehearsal) {
     director.event({type:'mode',value:'auto'})
     director.event({type:'viewer-window',value:true})
   }
+  initializing=false
   async function executeTurn(turn, engine, delivery = 'text', response) {
       performance.clear()
       turn.controller.signal.addEventListener('abort',()=>performance.cancel(turn.id),{once:true})
       turn.input.engine = engine
+      const carriedThought=engine==='deepseek'?participation.thought.snapshot(scene.topic):null
+      if(carriedThought)turn.input.pendingThoughtId=carriedThought.id
       turn.voiceOwned = Boolean(voice.worker)
       turn.airiRun = airi.session?.ready && engine === 'deepseek' ? airi.session.id : null
       turn.delivery = turn.airiRun ? 'audio' : voice.ready && voice.output && engine === 'deepseek' ? 'audio' : delivery ?? 'text'
@@ -157,7 +164,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       let completed = false
       try {
         const chunks = turn.preparedReply && engine === 'deepseek' ? [turn.preparedReply] :
-          (engine === 'mock' ? mockReply : reply)({ apiKey, model, history: [...histories[engine]], scene:scene.snapshot(engine), currentTopic:scene.topic, input: turn.input, signal: turn.controller.signal })
+          (engine === 'mock' ? mockReply : reply)({ apiKey, model, history: [...histories[engine]], scene:scene.snapshot(engine), currentTopic:scene.topic, pendingThought:carriedThought, input: turn.input, signal: turn.controller.signal })
         for await (const chunk of performedText(chunks, (name,motion) => {
           if (scheduler.isCurrent(turn)) {
             performance.play(name,{turn:turn.id,motion,defer:turn.delivery==='audio' && turn.playback!=='playing'})
@@ -375,7 +382,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       if (path === '/api/host-speaking' || path === '/api/mute') {
         if (typeof body.value !== 'boolean') throw new HttpError(400, 'value 需要布尔值')
         performance.clear()
-        participation.invalidate()
+        participation.invalidate({clearThought:true})
         director.reset(path === '/api/mute' ? 'manual_mute_changed' : 'manual_host_override')
         if (path === '/api/mute') scheduler.setMuted(body.value)
         else scheduler.setHostSpeaking(body.value)
@@ -384,7 +391,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       }
       if (path === '/api/interrupt') {
         performance.clear()
-        participation.invalidate()
+        participation.invalidate({clearThought:true})
         director.reset('manual_interrupt')
         scheduler.interrupt()
         json(response, 200, scheduler.status())
@@ -392,7 +399,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       }
       if (path === '/api/reset') {
         performance.clear()
-        participation.invalidate(); participation.lastDecision=null; participation.lastKey=null
+        participation.invalidate({clearThought:true}); participation.lastDecision=null; participation.lastKey=null
         scene.clear()
         room.clear()
         director.reset('reset', { clearSpeech: true })

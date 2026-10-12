@@ -37,6 +37,7 @@ export class Director {
     this.trace = []
     this.traceNumber = 0
     this.viewerWindow = false
+    this.followUp = null
   }
 
   record(action, reason, details = {}) {
@@ -192,6 +193,7 @@ export class Director {
     if (candidate.revision !== this.revision ||
       this.now() >= candidate.expiresAt || this.mode !== 'auto' || this.scheduler.muted ||
       this.scheduler.hostSpeaking || this.scheduler.active) return null
+    if(candidate.thoughtId!==undefined && !this.followUp?.validate(candidate.thoughtId))return null
     if (candidate.source === 'viewer') {
       const item = candidate.semanticSelection ? this.scheduler.eligibleViewers().find(x => x.id === candidate.messageId && x.platform === candidate.platform) : this.scheduler.peekViewer()
       if (!this.viewerWindow || !item || item.id !== candidate.messageId || item.platform !== candidate.platform) return null
@@ -204,7 +206,10 @@ export class Director {
     if (candidate.intent === 'opportunity') this.lastParticipation = this.now()
     this.invalidate('decision_consumed')
     const turn = this.scheduler.beginHost(candidate.text)
-    if (turn) { turn.input.participation = candidate.intent; Object.assign(turn, {preparedReply:candidate.preparedReply, performance:candidate.performance, motion:candidate.motion, decisionMs:candidate.decisionMs}) }
+    if (turn) {
+      if(candidate.thoughtId!==undefined){this.followUp.consume(candidate.thoughtId);turn.input.source='followup'}
+      turn.input.participation = candidate.intent; Object.assign(turn, {preparedReply:candidate.preparedReply, performance:candidate.performance, motion:candidate.motion, decisionMs:candidate.decisionMs})
+    }
     return turn
   }
 
