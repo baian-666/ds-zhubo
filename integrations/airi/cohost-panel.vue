@@ -10,6 +10,8 @@ import decisions from '../../../../i18n/src/locales/cohost/decisions.json'
 import en from '../../../../i18n/src/locales/cohost/en.json'
 import zh from '../../../../i18n/src/locales/cohost/zh-Hans.json'
 
+import { cohostInput } from '../../composables/use-cohost-voice'
+
 const props = defineProps<{ stage: 'web' | 'desktop' }>()
 const emit = defineEmits<{ performance: [value: unknown] }>()
 const open = defineModel<boolean>('open', { default: true })
@@ -181,6 +183,10 @@ async function send() {
   })
 }
 function message(entry: Entry) {
+  if (entry.role === 'director' && entry.reason === 'participation_error')
+    return t('decisionError')
+  if (entry.role === 'director' && entry.reason === 'participation_timeout')
+    return t('decisionTimeout')
   if (entry.role === 'director')
     return entry.explanation ?? decisions[entry.reason as keyof typeof decisions] ?? t('waiting')
   return entry.text || t(entry.status === 'cancelled' ? 'cancelled' : 'thinking')
@@ -261,6 +267,14 @@ onUnmounted(() => {
         </Button>
       </div>
       <small :class="['text-xs text-neutral-500']">{{ voiceLabel }}</small>
+      <div v-if="ownVoice" data-cohost-input :class="['flex flex-col gap-1 text-xs text-neutral-500 dark:text-neutral-400']">
+        <div role="meter" :aria-label="t('inputVolume')" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="Math.round(cohostInput.level * 100)" :class="['h-1.5 overflow-hidden rounded bg-neutral-200 dark:bg-neutral-700']">
+          <div :class="['h-full rounded bg-primary-400 transition-width duration-150']" :style="{ width: `${cohostInput.level * 100}%` }" />
+        </div>
+        <span>{{ t(`input_${cohostInput.phase}`) }}</span>
+        <span v-if="cohostInput.issue" :class="['text-orange-600 dark:text-orange-300']">{{ t(`inputIssue_${cohostInput.issue}`) }}</span>
+        <span v-else-if="cohostInput.quiet">{{ t('inputQuiet') }}</span>
+      </div>
       <div :class="['flex gap-2']" role="group" :aria-label="t('host')">
         <Button :variant="role === 'host' ? 'primary' : 'secondary'" @click="role = 'host'">
           {{ t('host') }}
@@ -284,7 +298,7 @@ onUnmounted(() => {
         </summary>
         <p>{{ t('model') }}: {{ state?.configuration.model }} · {{ t('persona') }}: {{ state?.configuration.persona }}</p>
         <p>{{ t('configVoice') }}: {{ state?.configuration.recognition }} / {{ state?.configuration.speech }} · {{ state?.configuration.voice }}</p>
-        <p>{{ t('configDevice') }} · {{ t('voiceTip') }}</p>
+        <p>{{ t('configDevice', { device: cohostInput.device || t('systemMicrophone') }) }} · {{ t('voiceTip') }}</p>
         <p>{{ t('configNote') }}</p>
         <p>{{ t('tip') }}</p>
       </details>

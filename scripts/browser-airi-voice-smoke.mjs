@@ -7,6 +7,7 @@ import {createApp} from '../apps/cohost/server.mjs'
 const {chromium}=await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 // The fake device starts its file immediately. Silence keeps speech after capture setup.
 const source=readFileSync(new URL('../data/voice-fixture.wav',import.meta.url))
+const pauseTest=process.argv.includes('--pause-test')
 let format,pcm
 for(let offset=12;offset+8<=source.length;){
  const length=source.readUInt32LE(offset+4),id=source.toString('ascii',offset,offset+4)
@@ -18,19 +19,28 @@ assert.ok(format && pcm)
 assert.equal(format.readUInt16LE(0),1)
 const padding=Buffer.alloc(format.readUInt32LE(8)*2)
 const header=Buffer.alloc(44)
-header.write('RIFF');header.writeUInt32LE(36+padding.length+pcm.length,4);header.write('WAVE',8);header.write('fmt ',12);header.writeUInt32LE(16,16);format.copy(header,20);header.write('data',36);header.writeUInt32LE(padding.length+pcm.length,40)
+const testPcm=pauseTest ? Buffer.concat([pcm,Buffer.alloc(Math.round(format.readUInt32LE(8)*0.9)),pcm]) : pcm
+header.write('RIFF');header.writeUInt32LE(36+padding.length+testPcm.length,4);header.write('WAVE',8);header.write('fmt ',12);header.writeUInt32LE(16,16);format.copy(header,20);header.write('data',36);header.writeUInt32LE(padding.length+testPcm.length,40)
 const voiceFixture=fileURLToPath(new URL('../data/airi-synthetic-input.wav',import.meta.url))
-writeFileSync(voiceFixture,Buffer.concat([header,padding,pcm]))
+writeFileSync(voiceFixture,Buffer.concat([header,padding,testPcm]))
 const audio=readFileSync(new URL('../data/siliconflow-voice-trial.wav',import.meta.url))
 const real=process.argv.includes('--real')
+if(real && pauseTest)throw Error('Pause regression uses mocked recognition only')
 const freeMotion=process.argv.includes('--free-motion')
 const motion={label:'边说边动',frames:[{ms:1200,pose:{eyeX:-0.6,headZ:-0.25},expression:{name:'星星眼',strength:0.6},components:{tailBase:0.3,orderX:0.25}},{ms:1200,pose:{eyeX:0.4,headZ:0.3},components:{tailBase:-0.3}},{ms:1200,pose:{eyeX:0,headZ:0},components:{tailBase:0}}]}
 if(real && (!process.env.DEEPSEEK_API_KEY || !process.env.SILICONFLOW_API_KEY))throw Error('Configure local model and speech credentials first')
 const calls=[]
+let asrCalls=0,asrAborted=0
 const server=createApp({apiKey:real ? process.env.DEEPSEEK_API_KEY : 'test-only',semanticEnabled:real,token:'',rehearsal:true,
   reply:real ? streamReply : async function*(){yield '你好，我听到了。';if(freeMotion)yield '<act:'+JSON.stringify(motion)+'>';await new Promise(r=>setTimeout(r,200));yield '我们继续聊吧。'},
   airiOptions:{key:real ? process.env.SILICONFLOW_API_KEY : 'test-speech-only',fetchImpl:async(url,options)=>{
     calls.push({kind:url.endsWith('speech')?'tts':'asr',at:Date.now()})
+    if(pauseTest && url.endsWith('transcriptions')){
+      const part=++asrCalls
+      options.signal.addEventListener('abort',()=>asrAborted++,{once:true})
+      if(part===1)await new Promise(resolve=>setTimeout(resolve,10000))
+      return Response.json({text:part===1?'小鲸鱼，你觉得前半句怎么样？':'我继续说后半句。'})
+    }
     if(real){
       if(url.endsWith('transcriptions'))writeFileSync('data/airi-synthetic-segment.wav',Buffer.from(await options.body.get('file').arrayBuffer()))
       return await fetch(url,options)
@@ -72,6 +82,13 @@ try {
   assert.equal(result.state.room.entries.filter(e=>e.role==='assistant').length,1)
   assert.equal(result.state.room.entries.find(e=>e.role==='assistant').playedChars,result.state.room.entries.find(e=>e.role==='assistant').text.length)
   assert.ok(calls.some(c=>c.kind==='asr'));assert.ok(calls.some(c=>c.kind==='tts'))
+  if(pauseTest){
+    assert.ok(asrCalls>=2,'both pause-separated segments must reach recognition')
+    assert.equal(asrAborted,0,'continuing speech must not abort earlier recognition')
+    const transcript=result.state.room.entries.find(e=>e.role==='host').text
+    assert.ok(transcript.includes('前半句')&&transcript.includes('后半句'),'both recognized sentences must reach the director')
+    result.pauseRegression={asrCalls,asrAborted,transcript}
+  }
   const frame=page.frames().find(f=>f.url().startsWith('http://127.0.0.1:5173'))
   const module='/@fs/'+fileURLToPath(new URL('../vendor/airi/packages/stage-ui/src/stores/audio.ts',import.meta.url)).replaceAll('\\','/')
   result.model=await frame.evaluate(()=>{const store=document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('live2d-expressions');return {id:store.modelId,expressions:store.expressionGroups.size}})

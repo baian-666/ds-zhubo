@@ -1,7 +1,7 @@
 import type { createSpeechPipeline, IntentHandle, TtsRequest } from '@proj-airi/pipelines-audio'
 
 import { toWav } from '@proj-airi/audio/encoding'
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, shallowRef } from 'vue'
 
 import * as v from 'valibot'
 
@@ -10,6 +10,12 @@ import workletUrl from '../workers/vad/process.worklet?worker&url'
 import { useVAD } from '../stores/ai/models/vad'
 import { useHearingStore } from '../stores/modules/hearing'
 import { useAudioDevice } from './audio/audio-device'
+import { RecognitionTurns } from './recognition-turns'
+
+type InputPhase = 'off' | 'starting' | 'listening' | 'speaking' | 'recognizing' | 'empty' | 'short' | 'error'
+interface InputStatus { phase: InputPhase, level: number, device: string, issue: string, quiet: boolean }
+/** Renderer-local capture feedback. No audio or provider credential enters this UI state. */
+export const cohostInput = shallowRef<InputStatus>({ phase: 'off', level: 0, device: '', issue: '', quiet: false })
 
 const pulseSchema = v.object({
   run: v.nullable(v.string()),
@@ -45,7 +51,13 @@ class CohostVoice {
   private started = false
   private ended = false
   private utterance = 0
-  private recognition: AbortController | undefined
+  private readonly input = new RecognitionTurns()
+  private recognitionQueue = Promise.resolve()
+  private readonly recognitions = new Set<AbortController>()
+  private analyser: AnalyserNode | undefined
+  private inputSource: MediaStreamAudioSourceNode | undefined
+  private samples = new Float32Array(1024)
+  private lastSound = 0
   private pollRequest: AbortController | undefined
   private timer: ReturnType<typeof setInterval> | undefined
   private lastPulse = Date.now()
@@ -60,15 +72,27 @@ class CohostVoice {
       onSpeechStart: () => {
         if (!this.run)
           return
-        this.recognition?.abort()
         this.utterance = Math.max(Date.now(), this.utterance + 1)
+        if (!this.input.begin(this.utterance)) {
+          cohostInput.value = { ...cohostInput.value, phase: 'error', issue: 'backlog' }
+          this.postEvent({ type: 'error' })
+          return
+        }
+        cohostInput.value = { ...cohostInput.value, phase: 'speaking', issue: '' }
         this.postEvent({ type: 'speech-start', utterance: this.utterance })
       },
       onSpeechCancel: () => {
-        this.postEvent({ type: 'speech-end', utterance: this.utterance })
+        this.finishRecognition(this.utterance, '', 'short')
       },
       onSpeechReady: ({ buffer }) => {
-        void this.transcribe(buffer)
+        const run = this.run
+        const utterance = this.utterance
+        cohostInput.value = { ...cohostInput.value, phase: 'recognizing' }
+        // Short pauses keep earlier ASR alive. Stop/reconnect still cancels the whole lease.
+        this.recognitionQueue = this.recognitionQueue.then(async () => {
+          if (run && this.run === run)
+            await this.transcribe(buffer, run, utterance)
+        })
       },
     })
   }
@@ -86,13 +110,18 @@ class CohostVoice {
     this.feedback = this.feedback.then(async () => {
       if (this.run !== run)
         return
-      await fetch(`${this.origin}/api/airi/stage/event`, {
+      const response = await fetch(`${this.origin}/api/airi/stage/event`, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(2000),
       })
-    }).catch(() => {})
+      if (!response.ok)
+        throw new Error('Voice feedback failed')
+    }).catch(() => {
+      if (this.run === run)
+        cohostInput.value = { ...cohostInput.value, issue: 'connection' }
+    })
   }
 
   private receipt(event: string) {
@@ -186,7 +215,16 @@ class CohostVoice {
   /** Cancels playback and synthesis before releasing the capture device. */
   stop() {
     this.run = null
-    this.recognition?.abort()
+    for (const request of this.recognitions)
+      request.abort()
+    this.recognitions.clear()
+    this.recognitionQueue = Promise.resolve()
+    this.input.reset()
+    this.inputSource?.disconnect()
+    this.analyser?.disconnect()
+    this.inputSource = undefined
+    this.analyser = undefined
+    cohostInput.value = { phase: 'off', level: 0, device: '', issue: '', quiet: false }
     for (const request of this.requests)
       request.abort()
     this.cancelTurn()
@@ -198,6 +236,7 @@ class CohostVoice {
 
   private async capture(run: string) {
     try {
+      cohostInput.value = { ...cohostInput.value, phase: 'starting' }
       await this.audioContext.resume()
       await this.vad.init()
       if (this.run !== run)
@@ -212,6 +251,12 @@ class CohostVoice {
         return
       }
       this.stream = stream
+      this.inputSource = this.audioContext.createMediaStreamSource(stream)
+      this.analyser = this.audioContext.createAnalyser()
+      this.analyser.fftSize = this.samples.length
+      this.inputSource.connect(this.analyser)
+      this.lastSound = Date.now()
+      cohostInput.value = { phase: 'listening', level: 0, device: stream.getAudioTracks()[0]?.label ?? '', issue: '', quiet: false }
       await this.vad.start(stream)
     }
     catch {
@@ -223,15 +268,23 @@ class CohostVoice {
     }
   }
 
-  private async transcribe(buffer: Float32Array) {
-    const run = this.run
-    const utterance = this.utterance
-    if (!run || buffer.length > 16000 * 55) {
-      this.postEvent({ type: 'speech-end', utterance })
+  private finishRecognition(utterance: number, text: string, phase: InputPhase = 'empty') {
+    const result = this.input.complete(utterance, text)
+    if (!result)
+      return
+    if (result.text)
+      this.postEvent({ type: 'transcript', utterance: result.utterance, text: result.text, final: true })
+    this.postEvent({ type: 'speech-end', utterance: result.utterance })
+    cohostInput.value = { ...cohostInput.value, phase: result.text ? 'listening' : phase }
+  }
+
+  private async transcribe(buffer: Float32Array, run: string, utterance: number) {
+    if (buffer.length > 16000 * 55) {
+      this.finishRecognition(utterance, '', 'error')
       return
     }
     const controller = new AbortController()
-    this.recognition = controller
+    this.recognitions.add(controller)
     const provider = {
       transcription: (model: string) => ({
         baseURL: `${this.origin}/api/airi/stage/`,
@@ -243,19 +296,35 @@ class CohostVoice {
     try {
       const file = new File([toWav(buffer.slice().buffer, 16000)], 'recording.wav', { type: 'audio/wav' })
       const result = await this.hearing.transcription('openai-compatible-audio-transcription', provider, 'FunAudioLLM/SenseVoiceSmall', file, 'json')
-      if (this.run !== run || this.utterance !== utterance || controller.signal.aborted)
-        return
       const text = result.mode === 'generate' ? result.text : await result.text
-      if (text.trim())
-        this.postEvent({ type: 'transcript', utterance, text, final: true })
-      this.postEvent({ type: 'speech-end', utterance })
+      if (this.run !== run || controller.signal.aborted)
+        return
+      this.finishRecognition(utterance, text)
     }
     catch {
-      if (this.run === run && this.utterance === utterance && !controller.signal.aborted) {
-        this.postEvent({ type: 'speech-end', utterance })
-        this.postEvent({ type: 'error' })
+      if (this.run === run && !controller.signal.aborted) {
+        cohostInput.value = { ...cohostInput.value, issue: 'recognition' }
+        this.finishRecognition(utterance, '', 'error')
       }
     }
+    finally {
+      this.recognitions.delete(controller)
+    }
+  }
+
+  private sampleInput() {
+    if (!this.analyser)
+      return
+    if (this.vad.inferenceError.value)
+      cohostInput.value = { ...cohostInput.value, phase: 'error', issue: 'detection' }
+    else if (this.stream?.getAudioTracks()[0]?.readyState === 'ended')
+      cohostInput.value = { ...cohostInput.value, phase: 'error', issue: 'device' }
+    this.analyser.getFloatTimeDomainData(this.samples)
+    const rms = Math.sqrt(this.samples.reduce((sum, amount) => sum + amount * amount, 0) / this.samples.length)
+    if (rms > 0.003)
+      this.lastSound = Date.now()
+    const level = rms > 0 ? Math.max(0, Math.min(1, (20 * Math.log10(rms) + 60) / 60)) : 0
+    cohostInput.value = { ...cohostInput.value, level, quiet: Date.now() - this.lastSound > 5000 }
   }
 
   /** Uses AIRI chunking and playback with fixed-provider audio from the local server. */
@@ -324,6 +393,7 @@ class CohostVoice {
     if (this.disposed || this.polling)
       return
     this.polling = true
+    this.sampleInput()
     this.pollRequest = new AbortController()
     const timeout = setTimeout(() => this.pollRequest?.abort(), 1000)
     try {

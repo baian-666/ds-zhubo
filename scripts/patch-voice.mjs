@@ -8,6 +8,15 @@ const head=spawnSync('git',['rev-parse','HEAD'],{cwd:join(root,'vendor/airi'),en
 if(head.status!==0 || head.stdout.trim()!==base.commit)throw Error('AIRI voice overlay requires the pinned base')
 const dest=join(root,'vendor/airi/packages/stage-ui/src/composables/use-cohost-voice.ts')
 const src=readFileSync(join(root,'integrations/airi/use-cohost-voice.ts'))
+for (const name of ['recognition-turns.ts','recognition-turns.test.ts']) {
+  const target=join(root,'vendor/airi/packages/stage-ui/src/composables',name)
+  const contents=readFileSync(join(root,'integrations/airi',name))
+  const previous=join(root,'data/airi-overlay',name)
+  if(existsSync(target)&&!readFileSync(target).equals(contents)&&(!existsSync(previous)||!readFileSync(target).equals(readFileSync(previous))))throw Error('Unsaved recognition edits')
+  mkdirSync(dirname(target),{recursive:true});mkdirSync(dirname(previous),{recursive:true})
+  if(!existsSync(target)||!readFileSync(target).equals(contents))writeFileSync(target,contents)
+  writeFileSync(previous,contents)
+}
 const saved=join(root,'data/airi-overlay/shared-voice.ts')
 if(existsSync(dest)&&!readFileSync(dest).equals(src)&&(!existsSync(saved)||!readFileSync(dest).equals(readFileSync(saved))))throw Error('Unsaved shared voice edits')
 mkdirSync(dirname(dest),{recursive:true});mkdirSync(dirname(saved),{recursive:true})
