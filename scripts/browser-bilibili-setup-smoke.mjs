@@ -37,6 +37,8 @@ try {
     return route.continue()
   })
   await page.goto(base)
+  assert.equal(await page.getByRole('link', { name: '打开 B站身份码入口' }).getAttribute('href'), 'https://play-live.bilibili.com/')
+  await page.getByText('在 B站页面右上角点“身份码”', { exact: false }).waitFor()
   assert.equal(await page.locator('#value').getAttribute('type'), 'password')
   await page.locator('#value').fill('fixture-private-identity#literal')
   await page.getByRole('button', { name: '保存并应用' }).click()

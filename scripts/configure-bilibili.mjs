@@ -59,7 +59,8 @@ export function createBilibiliSetup({
   const page = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>小鲸鱼 · B站弹幕配置</title>
 <style>body{margin:0;padding:24px;background:#edf3f5;color:#183044;font:17px/1.7 system-ui}main{max-width:580px;margin:6vh auto;background:white;border-radius:18px;padding:28px}input,select,button{width:100%;box-sizing:border-box;font:inherit;padding:12px;margin:8px 0;border:1px solid #b6ccd6;border-radius:9px}button{background:#b5e7e6;cursor:pointer}small{color:#597482}a{color:#187c8c}</style>
 <main data-bilibili-setup><h1>接入 B站真实弹幕</h1><p>已采用本机 blivechat。无需自建开发者应用，不开启推流、不自动收音。</p>
-<p><a href="https://play-live.bilibili.com/details/1694397161340" target="_blank" rel="noopener noreferrer">获取自己的主播身份码</a> · <a href="http://127.0.0.1:12451/" target="_blank" rel="noopener noreferrer">打开本机 blivechat</a></p>
+<p><a href="https://play-live.bilibili.com/" target="_blank" rel="noopener noreferrer">打开 B站身份码入口</a> · <a href="http://127.0.0.1:12451/" target="_blank" rel="noopener noreferrer">打开本机 blivechat</a></p>
+<p>在 B站页面右上角点“身份码”，按提示登录主播账号。若内置浏览器无法打开，请在平常使用的 Edge 或 Chrome 打开 <a href="https://play-live.bilibili.com/" target="_blank" rel="noopener noreferrer">互动玩法首页</a>。取得后回到此页填写；不要发到聊天里。</p>
 <form id="setup"><label for="kind">连接方式</label><select id="kind"><option value="code">主播身份码（推荐）</option><option value="room">房间号（兼容试验）</option></select>
 <label for="value" id="label">主播身份码</label><input id="value" type="password" autocomplete="off" spellcheck="false" maxlength="256" required><button id="save">保存并应用</button></form>
 <p id="state" role="status">身份码只写入本机忽略的 .env，不显示、不提交。无需提供 Cookie。</p><small>保存后，在小鲸鱼“当前配置”里点击“连接 B站弹幕”。已连接只是本机转发通道正常，要看到真实观众消息才算接通。房间号模式可能遇到信息打码或收取限制。</small></main>
