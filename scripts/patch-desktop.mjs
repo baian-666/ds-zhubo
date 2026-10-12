@@ -25,6 +25,7 @@ for (const name of ['cohost-contract.ts','desktop-main.ts','motion-sequence.ts']
 function hook(relative, anchor, replacement) {
   const destination = join(appRoot,relative)
   let text = readFileSync(destination,'utf8')
+  if (anchor.startsWith('import ') && text.includes(replacement.split('\n')[0])) return
   if (text.includes(replacement)) return
   if (!text.includes(anchor)) throw new Error('Desktop anchor changed: '+relative)
   writeFileSync(destination,text.replace(anchor,replacement))
@@ -46,6 +47,13 @@ hook('src/main/windows/main/index.ts', '  await load(window, withHashRoute(',
   '  connectCohostDesktop(window)\n  await load(window, withHashRoute(')
 hook('electron.vite.config.ts', 'developmentModels: sherpawModels,',
   "developmentModels: env.DS_ZHUBO_DESKTOP === '1' ? [] : sherpawModels,")
+// Keep the existing localhost origin so the desktop model database and settings stay available.
+const configPath=join(appRoot,'electron.vite.config.ts')
+let configText=readFileSync(configPath,'utf8')
+configText=configText.replace("{ host: '127.0.0.1', port: 5174, strictPort: true }", "{ host: 'localhost', port: 5174, strictPort: true }")
+if(configText!==readFileSync(configPath,'utf8'))writeFileSync(configPath,configText)
+hook('electron.vite.config.ts', '    server: {',
+  "    server: {\n      ...(env.DS_ZHUBO_DESKTOP === '1' ? { host: 'localhost', port: 5174, strictPort: true } : {}),")
 hook('src/main/windows/main/index.ts', 'if (is.dev || env.MAIN_APP_DEBUG || env.APP_DEBUG)',
   "if ((is.dev && env.DS_ZHUBO_DESKTOP !== '1') || env.MAIN_APP_DEBUG || env.APP_DEBUG)")
 console.log('Applied the reproducible AIRI desktop cohost overlay.')

@@ -1,12 +1,12 @@
 # 转为本地主力开发
 
-更新：2026-10-11。用户选择在当前 Windows 主力电脑本地开发。云端任务与 GitHub 保留项目记录，模型仍通过 DeepSeek API 使用；本地开发并不要求本机运行大模型。
+更新：2026-10-12。用户选择在当前 Windows 主力电脑本地开发。云端任务与 GitHub 保留项目记录，模型仍通过 DeepSeek API 使用；本地开发并不要求本机运行大模型。
 
 ## 当前 Windows 接续入口
 
 本轮已在 D:\ds-zhubo 安装固定版本工具链并启动 cohost。使用 scripts/setup-local.ps1 与 scripts/local.ps1，不需替换系统 Node。当前已实现 Windows 的 setup:airi:web 与 dev:airi；下方旧迁移记录中的“封装脚本拒绝 Windows”已被此实现替代。
 
-网页版与 Electron 桌面开发版均已接入同一场次，新增 Windows 本机语音试播。当前入口见 [桌面与语音试播](DESKTOP-VOICE.md)，文字操作见 [文字虚拟直播间](TEXT-ROOM.md)。实际验收以 STATUS 最新记录为准。下方旧迁移步骤保留历史背景。
+日常双击 `启动小鲸鱼.cmd` 打开桌面原生直播侧栏，`启动网页版.cmd` 为备用入口；操作与设置边界见 [AIRI 本机直播入口](AIRI-CONSOLE.md)。两端共享同一场次，语音说明见 [桌面与语音试播](DESKTOP-VOICE.md)，旧文字调试入口见 [文字虚拟直播间](TEXT-ROOM.md)。实际验收以 STATUS 最新记录为准。下方旧迁移步骤保留历史背景。
 
 ## 已完成与尚未完成
 

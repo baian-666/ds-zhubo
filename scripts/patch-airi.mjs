@@ -53,3 +53,5 @@ writeFileSync(join(root,'data/airi-overlay/bundle-inputs.json'),JSON.stringify(b
 const voicePatch=spawnSync(process.execPath,[join(root,'scripts/patch-voice.mjs')],{cwd:root,stdio:'inherit'})
 if(voicePatch.status!==0)throw new Error('Shared voice overlay failed')
 console.log('Applied pinned AIRI cohost overlay and rebuilt the parent bridge.')
+const consolePatch=spawnSync(process.execPath,[join(root,'scripts/patch-console.mjs')],{cwd:root,stdio:'inherit'})
+if(consolePatch.status!==0)throw new Error('Live room panel overlay failed')

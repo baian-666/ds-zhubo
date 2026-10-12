@@ -1,5 +1,8 @@
 import { connectStage } from './stage-bridge.mjs'
 const $ = id => document.getElementById(id)
+const debug = new URLSearchParams(location.search).has('debug')
+document.body.classList.toggle('debug', debug)
+if (!debug) $('voiceStage').value = 'web'
 const voiceOwner = crypto.randomUUID()
 let voiceLeaseAt = 0
 const poseNames={idle:'待机',listen:'倾听',think:'思考',nod:'点头',smile:'轻笑',surprise:'惊讶',pout:'嘴硬',sequence:'自主表演'}
@@ -14,7 +17,7 @@ for(const button of document.querySelectorAll('[data-pose]'))button.onclick=()=>
 const stageUrl='http://127.0.0.1:5173/?cohostOrigin='+encodeURIComponent(location.origin)
 $('stage').src=stageUrl
 const savedEngine = sessionStorage.getItem('rehearsalEngine')
-if (['deepseek','mock'].includes(savedEngine)) $('engine').value = savedEngine
+if (debug && ['deepseek','mock'].includes(savedEngine)) $('engine').value = savedEngine
 let state, utterance, activeRequest = null, activeTurn = null, refreshing = false, submitting = false
 let seenTrace = 0, attemptedDecision = 0, simulatedNumber = 0, blockedDecision = 0
 const reasons = {
@@ -73,6 +76,10 @@ async function refresh() {
   refreshing = true
   try {
     state = await data(await api('status'))
+    if (state.live) {
+      const answer = state.room.entries.findLast(entry => entry.role === 'assistant')
+      if (answer) $('answer').textContent = answer.text || '正在想怎么回答…'
+    }
     renderVoice(state.voice)
     if (state.voice?.active && state.voice.owner === voiceOwner && Date.now() - voiceLeaseAt > 1800) {
       voiceLeaseAt = Date.now()
@@ -95,7 +102,7 @@ async function refresh() {
 }
 
 function autoReply() {
-  if (state?.airi?.active) return
+  if (state?.live || state?.airi?.active) return
   if (state?.voice?.active && state.voice.owner !== voiceOwner) return
   const candidate = state?.director?.candidate
   if (submitting || activeRequest || state?.director?.mode !== 'auto' || !candidate || candidate.id <= attemptedDecision) return
@@ -168,6 +175,7 @@ async function speakLine() {
   if (!$('hostText').value.trim()) throw new Error('请先输入主播文字')
   submitting=true
   try {
+    if (!debug) await api('live/start', {})
     if (!state?.hostSpeaking || !utterance) await startSpeech()
     await finishText()
     await event({type:'speech-end',utterance})
@@ -177,9 +185,10 @@ async function speakLine() {
   } finally { submitting=false; autoReply() }
 }
 async function enqueue(text, simulated=false) {
+  if (!debug) await api('live/start', {})
   const result = await data(await api('danmaku',{id:crypto.randomUUID(),platform:$('platform').value,
     userId: simulated ? `sim-${++simulatedNumber}` : $('userId').value.trim() || `viewer-${++simulatedNumber}`,text,
-    mentioned:simulated ? /^(助播|小鲸鱼)/u.test(text) : $('mentioned').checked,selected:false}))
+    mentioned:simulated ? /^(助播|小鲸鱼)/u.test(text) : (debug ? $('mentioned').checked : /小鲸鱼|助播|鲸鱼/u.test(text)),selected:false}))
   trace('弹幕', result.accepted ? text : '重复消息已忽略')
 }
 async function safe(action) { try { await action(); await refresh() } catch(error) { feedback(error.message); trace('提示',error.message) } }
@@ -412,6 +421,7 @@ bind('voiceStage',async()=>renderVoice(state?.voice),'change')
 bind('voiceStart', async () => {
   if ($('voiceBackend').value==='airi') {
     if ($('engine').value!=='deepseek') throw new Error('请先在更多设置中切换到真实 DeepSeek 回复')
+    if (!debug) await api('live/start', {})
     await api('airi/start',{owner:voiceOwner,stage:$('voiceStage').value});return
   }
   renderVoice(await (await api('voice/start', {owner:voiceOwner,output:$('voiceOutput').checked})).json())

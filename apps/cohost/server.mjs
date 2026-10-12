@@ -57,6 +57,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
   const room = new RoomJournal()
   const scene = new Scene()
   const performance = new Performance()
+  let live = false
   const participation = new Participation({ ...participationOptions, director, scheduler, scene,
     onReaction: result => {
       performance.play(result.performance ?? 'nod', {source:'reaction',motion:result.motion})
@@ -201,6 +202,18 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       const stageOrigin = request.headers.origin
       const stageOrigins = ['http://127.0.0.1:5173','http://localhost:5173','http://127.0.0.1:5174','http://localhost:5174']
       const stagePath = path?.startsWith('/api/airi/stage/')
+      const localStage = stageOrigins.includes(stageOrigin) && ['127.0.0.1','::1','::ffff:127.0.0.1'].includes(request.socket.remoteAddress)
+      if (!stagePath && path?.startsWith('/api/') && stageOrigin) {
+        if (!localStage && stageOrigin !== 'http://' + request.headers.host) throw new HttpError(403, '不接受此页面的控制请求')
+        if (localStage) {
+          response.setHeader('Access-Control-Allow-Origin', stageOrigin)
+          response.setHeader('Vary', 'Origin')
+          if (request.method === 'OPTIONS') {
+            response.writeHead(204, {'Access-Control-Allow-Methods':'GET, POST','Access-Control-Allow-Headers':'Authorization, Content-Type'})
+            response.end(); return
+          }
+        }
+      }
       if (stagePath) {
         if (!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(request.socket.remoteAddress) || !stageOrigins.includes(stageOrigin))
           throw new HttpError(403, '仅接受本机 AIRI 舞台')
@@ -281,17 +294,28 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
       if (!path?.startsWith('/api/')) throw new HttpError(404, '未找到')
       if (!authorized(request, token)) throw new HttpError(401, '请填写正确的助播访问令牌')
       if (request.method === 'GET' && path === '/api/status') {
-        json(response, 200, { ...scheduler.status(), director: director.status(), participation:participation.status(), deepseekConfigured: Boolean(apiKey), model, persona:'小鲸鱼', voice:voice.snapshot(), airi:airi.snapshot(), performance:{...performance.snapshot({...scheduler.status(), thinking:participation.status().busy}),session:room.session}, room: room.status(), queue: scheduler.queue.map(({id,platform,userId,text,mentioned,selected,receivedAt}) => ({id,platform,userId,text,mentioned,selected,expiresAt:receivedAt + scheduler.ttlMs})), stage: '本机直播试播；AIRI 云端语音与口型，Windows 语音备用' })
+        json(response, 200, { ...scheduler.status(), live, configuration:{provider:'DeepSeek', model, persona:'小鲸鱼', recognition:'FunAudioLLM/SenseVoiceSmall', speech:'FunAudioLLM/CosyVoice2-0.5B', voice:'claire'}, director: director.status(), participation:participation.status(), deepseekConfigured: Boolean(apiKey), model, persona:'小鲸鱼', voice:voice.snapshot(), airi:airi.snapshot(), performance:{...performance.snapshot({...scheduler.status(), thinking:participation.status().busy}),session:room.session}, room: room.status(), queue: scheduler.queue.map(({id,platform,userId,text,mentioned,selected,receivedAt}) => ({id,platform,userId,text,mentioned,selected,expiresAt:receivedAt + scheduler.ttlMs})), stage: '本机直播试播；AIRI 云端语音与口型，Windows 语音备用' })
         return
       }
       if (request.method !== 'POST') throw new HttpError(405, '请使用 POST')
-      // JSON and no CORS support prevent cross-origin form submissions.
+      // Only the fixed local AIRI origins can use the authenticated control API.
       if (!request.headers['content-type']?.startsWith('application/json')) throw new HttpError(415, '需要 application/json')
-      if (request.headers['sec-fetch-site'] === 'cross-site') throw new HttpError(403, '不接受跨站请求')
+      if (request.headers['sec-fetch-site'] === 'cross-site' && !localStage) throw new HttpError(403, '不接受跨站请求')
       const body = await readBody(request)
+      if (path === '/api/live/start') {
+        if (!apiKey) throw new HttpError(503,'请先在本机 .env 配置 DeepSeek')
+        if (!live || director.mode !== 'auto' || !director.viewerWindow || !participation.enabled) {
+          if (scheduler.active || scheduler.hostSpeaking || voice.worker || airi.session) throw new HttpError(409,'请在当前发言和收音结束后进入直播模式')
+          directorEvent({type:'mode',value:'auto'})
+          directorEvent({type:'viewer-window',value:true})
+          participation.setEnabled(true)
+          live = true
+        }
+        json(response,200,{live});return
+      }
       if (path === '/api/airi/start' || path === '/api/airi/stop') {
         if (!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(request.socket.remoteAddress) ||
-          (request.headers.origin && request.headers.origin !== 'http://' + request.headers.host)) throw new HttpError(403,'仅接受本机控制台')
+          (request.headers.origin && request.headers.origin !== 'http://' + request.headers.host && !localStage)) throw new HttpError(403,'仅接受本机控制台')
         const owner=textField(body.owner,100)
         if(path === '/api/airi/start') {
           if(voice.worker || scheduler.active || scheduler.hostSpeaking) throw new HttpError(409,'请先结束当前发言或停止备用收音')
@@ -447,7 +471,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
   const tick = setInterval(() => {
     voice.tick(); airi.tick(); director.status(); participation.notify()
     const candidate=director.candidate
-    if(airi.session?.ready && apiKey && director.mode==='auto' && candidate && !scheduler.active) {
+    if((airi.session?.ready || (live && !airi.session && !voice.worker)) && apiKey && director.mode==='auto' && candidate && !scheduler.active) {
       participation.invalidate()
       const turn=director.consume(candidate.id)
       if(turn)void executeTurn(turn,'deepseek')

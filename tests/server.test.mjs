@@ -32,6 +32,65 @@ test('token protects control API and status does not expose credentials', async 
   assert.equal((await response.text()).includes('private-provider-key'), false)
 })
 
+test('native AIRI CORS preserves authentication and rejects unrelated origins', async t => {
+  const app = await start(t, { apiKey:'secret-provider-key', token:'local-control' })
+  const allowed = { Origin:'http://127.0.0.1:5174', 'Sec-Fetch-Site':'cross-site' }
+  assert.equal((await app.post('/api/live/start',{},allowed)).status,401)
+  const response = await app.post('/api/live/start',{}, {...allowed, Authorization:'Bearer local-control'})
+  assert.equal(response.status,200)
+  assert.equal(response.headers.get('access-control-allow-origin'),allowed.Origin)
+  assert.equal((await response.text()).includes('secret-provider-key'),false)
+  for (const Origin of ['https://evil.example','http://127.0.0.1:5175','null']) {
+    const denied = await app.post('/api/interrupt',{}, {Origin,Authorization:'Bearer local-control'})
+    assert.equal(denied.status,403)
+    assert.equal(denied.headers.get('access-control-allow-origin'),null)
+  }
+})
+
+test('live room consumes a text decision once without an open console response stream', async t => {
+  let calls=0
+  let completed
+  const delivered=new Promise(resolve=>{completed=resolve})
+  const app=await start(t,{apiKey:'test-key',token:'',reply:async function*(){calls++;yield '收到，我接一句。';completed()},planner:async()=>({action:'wait',reason:'先听'})})
+  assert.equal((await app.post('/api/live/start',{})).status,200)
+  assert.equal((await app.post('/api/live/start',{})).status,200)
+  await app.post('/api/director/event',{type:'speech-start',utterance:1})
+  await app.post('/api/director/event',{type:'transcript',utterance:1,text:'小鲸鱼，你来回答这个问题。',final:true})
+  await app.post('/api/director/event',{type:'speech-end',utterance:1})
+  await Promise.race([delivered,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('reply did not start')),2000);timer.unref()})])
+  const state=await (await app.get('/api/status')).json()
+  assert.equal(state.live,true)
+  assert.equal(state.room.entries.filter(x=>x.role==='assistant').length,1)
+  assert.equal(state.room.entries.find(x=>x.role==='assistant').text,'收到，我接一句。')
+  assert.equal(calls,1)
+  assert.equal((await app.post('/api/reply',{source:'director',decision:1})).status,409)
+  assert.equal(calls,1)
+  assert.equal(state.configuration.model,state.model)
+  assert.equal(JSON.stringify(state).includes('test-key'),false)
+})
+
+test('opening live mode does not silently replace an active rehearsal', async t => {
+  const app=await start(t,{apiKey:'test-key',token:''})
+  await app.post('/api/host-speaking',{value:true})
+  assert.equal((await app.post('/api/live/start',{})).status,409)
+  const state=await (await app.get('/api/status')).json()
+  assert.equal(state.live,false)
+  assert.equal(state.hostSpeaking,true)
+})
+
+test('live controls restore automatic participation after an idle debug session', async t => {
+  const app=await start(t,{apiKey:'test-key',token:''})
+  await app.post('/api/live/start',{})
+  await app.post('/api/director/event',{type:'mode',value:'manual'})
+  await app.post('/api/director/event',{type:'viewer-window',value:false})
+  await app.post('/api/participation',{enabled:false})
+  assert.equal((await app.post('/api/live/start',{})).status,200)
+  const state=await (await app.get('/api/status')).json()
+  assert.equal(state.director.mode,'auto')
+  assert.equal(state.director.viewerWindow,true)
+  assert.equal(state.participation.enabled,true)
+})
+
 test('reply streams answer and reuses completed history', async t => {
   const seen = []
   async function* reply(options) { seen.push(options); yield '你好'; yield '，主播。' }

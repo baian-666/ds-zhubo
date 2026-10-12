@@ -3,7 +3,7 @@ import type { BrowserWindow as Window } from 'electron'
 import { env } from 'node:process'
 
 import { createContext } from '@moeru/eventa/adapters/electron/main'
-import { BrowserWindow, ipcMain } from 'electron'
+import { ipcMain, screen } from 'electron'
 
 import * as v from 'valibot'
 
@@ -21,19 +21,13 @@ export function connectCohostDesktop(stage: Window) {
   let busy = false
   let closed = false
   let request: AbortController | undefined
-  const consoleWindow = new BrowserWindow({
-    title: 'ds-zhubo',
-    width: 1440,
-    height: 960,
-    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
-  })
-  consoleWindow.setMenuBarVisibility(false)
-  consoleWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  consoleWindow.webContents.on('will-navigate', (event, url) => {
-    if (new URL(url).origin !== origin)
-      event.preventDefault()
-  })
-  void consoleWindow.loadURL(origin)
+  // The stage and live room now share one window. Keep enough space for both.
+  const { workArea } = screen.getDisplayMatching(stage.getBounds())
+  stage.setMinimumSize(Math.min(960, workArea.width), Math.min(700, workArea.height))
+  const [width, height] = stage.getSize()
+  stage.setSize(Math.min(Math.max(width, 1180), workArea.width), Math.min(Math.max(height, 820), workArea.height))
+  const bounds = stage.getBounds()
+  stage.setPosition(Math.max(workArea.x, Math.min(bounds.x, workArea.x + workArea.width - bounds.width)), Math.max(workArea.y, Math.min(bounds.y, workArea.y + workArea.height - bounds.height)))
   async function poll() {
     if (busy || closed || stage.isDestroyed())
       return
@@ -68,7 +62,5 @@ export function connectCohostDesktop(stage: Window) {
     clearInterval(timer)
     request?.abort()
     runtime.dispose()
-    if (!consoleWindow.isDestroyed())
-      consoleWindow.close()
   })
 }

@@ -14,6 +14,7 @@ const head=spawnSync('git',['rev-parse','HEAD'],{cwd:vendor,encoding:'utf8'})
 if(head.status!==0||head.stdout.trim()!==lock.commit)throw new Error('AIRI revision differs from airi.lock.json')
 const env={...process.env,DS_ZHUBO_DESKTOP:'1',APP_USER_DATA_PATH:join(root,'data/desktop-profile'),APP_REMOTE_DEBUG_NO_OPEN:'true'}
 delete env.DEEPSEEK_API_KEY
+delete env.SILICONFLOW_API_KEY
 if(existsSync(join(root,'.env'))) {
   const local=parseEnv(readFileSync(join(root,'.env'),'utf8'))
   if(local.COHOST_ACCESS_TOKEN)env.COHOST_ACCESS_TOKEN=local.COHOST_ACCESS_TOKEN

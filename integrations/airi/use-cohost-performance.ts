@@ -195,7 +195,7 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
   }
 
   async function loadLocalModel() {
-    // Only the local rehearsal iframe adopts the prepared model, once per profile.
+    // The local web stage adopts the prepared model once per profile.
     if (!settings.stageModelSelected.startsWith('preset-') || localStorage.getItem('cohost/whale-installed-v2'))
       return
     modelImporting = true
@@ -247,6 +247,8 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
       live2d.live2dEyeTracking = false
       external = connect(receive)
       timer = setInterval(tick, 100)
+      if (location.port === '5173')
+        void loadLocalModel()
       return
     }
     const parentOrigin = new URLSearchParams(location.search).get('cohostOrigin')
