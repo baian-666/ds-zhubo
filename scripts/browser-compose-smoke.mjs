@@ -36,10 +36,23 @@ try {
   if(action==='talk')assert.ok(values.mouth>.3)
   if(action==='sway')assert.ok(Math.abs(values.body)>5)
  }
- for(const mode of ['old','body','compose']) {
+ await page.evaluate(()=>{
+  const model=preview.models.old,core=model.internalModel.coreModel,get=core.getDrawableOpacity.bind(core)
+  core.getDrawableOpacity=i=>{const opacity=get(i);(model.drawnOpacity??={})[core._model.drawables.ids[i]]=opacity;return opacity}
+ })
+ for(const mode of ['old','old-clean','body','compose']) {
   await page.locator('#mode').selectOption(mode)
+  await page.waitForTimeout(100)
   assert.equal(await page.evaluate(()=>preview.models.old.visible),mode!=='body')
-  assert.equal(await page.evaluate(()=>preview.models.body.visible),mode!=='old')
+  assert.equal(await page.evaluate(()=>preview.models.body.visible),!['old','old-clean'].includes(mode))
+  if(mode==='old-clean') {
+   assert.equal(await page.evaluate(()=>[...preview.cleanHidden].every(id=>preview.models.old.drawnOpacity[id]===0)),true)
+   assert.equal(await page.evaluate(()=>['ArtMesh110','ArtMesh111','ArtMesh112','ArtMesh201','ArtMesh60'].every(id=>preview.models.old.drawnOpacity[id]>.9)),true)
+   await page.evaluate(()=>preview.setAction('idle',0));await page.waitForTimeout(100)
+   await page.locator('canvas').screenshot({path:'data/compose-preview/old-clean-model.png'})
+   await page.locator('#mode').selectOption('old');await page.waitForTimeout(100)
+   assert.equal(await page.evaluate(()=>preview.models.old.drawnOpacity.ArtMesh108>.9 && preview.models.old.drawnOpacity.ArtMesh0>.9),true)
+  }
  }
  await page.locator('#headScale').fill('0.9');await page.locator('#save').click()
  await page.reload();await page.waitForFunction(()=>window.preview?.ready)
@@ -49,6 +62,6 @@ try {
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true)
  assert.ok(requests.every(url=>url.startsWith('http://127.0.0.1:8790/')))
  assert.deepEqual(errors,[])
- const result={kind:'actual dual-runtime-model composition in an isolated web preview',errors,checks:['front/back head alignment','left/right head and body motion rendered','mouth moves','smile suppresses normal eyes','three comparison modes','save and reload calibration','390px layout','no cohost or external requests']}
+ const result={kind:'actual dual-runtime-model composition in an isolated web preview',errors,checks:['front/back head alignment','left/right head and body motion rendered','mouth moves','smile suppresses normal eyes','four comparison modes','original props hidden while fingers, torso and tail remain','original props restored on mode switch','save and reload calibration','390px layout','no cohost or external requests']}
  writeFileSync('data/compose-preview/browser-result.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result))
 } finally {await browser.close()}

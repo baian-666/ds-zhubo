@@ -9,6 +9,9 @@ const stage=document.querySelector('#stage'),status=document.querySelector('#sta
 const app=new Application({width:stage.clientWidth,height:stage.clientHeight,backgroundAlpha:0,antialias:true,preserveDrawingBuffer:true,resolution:devicePixelRatio,autoDensity:true})
 stage.appendChild(app.view)
 const models={},hidden={old:new Set(),body:new Set(),back:new Set()},defaults={headScale:.82,headX:5,headY:100,zoom:1}
+// Verified against the original model: tabletop, board/clip, pen, desktop icons and sundae.
+// Keep the separate fingers, sleeves, torso, hair and tail. The sundae mesh includes its small gripping fingers.
+const cleanHidden=new Set(['ArtMesh0','ArtMesh107','ArtMesh108','ArtMesh109','ArtMesh103','ArtMesh612','ArtMesh609','ArtMesh607','ArtMesh604','ArtMesh602','ArtMesh599'])
 for(const [id,value]of Object.entries(defaults))document.getElementById(id).value=value
 try {
  const saved=JSON.parse(localStorage.getItem('whale-compose-preview')||'null')
@@ -17,7 +20,8 @@ try {
   if(Number.isFinite(value) && value>=Number(input.min) && value<=Number(input.max))input.value=value
  }
 } catch {}
-let action='idle',mode='compose',fixedTime=null,restNeck=null,headOrigin={x:0,y:0}
+let action='idle',mode=new URLSearchParams(location.search).get('view')==='old-clean'?'old-clean':'compose',fixedTime=null,restNeck=null,headOrigin={x:0,y:0}
+document.querySelector('#mode').value=mode
 const controls=()=>Object.fromEntries(Object.keys(defaults).map(id=>[id,Number(document.getElementById(id).value)]))
 function bounds(model,index) {
  const v=model.internalModel.getDrawableVertices(index),xs=[],ys=[]
@@ -35,7 +39,7 @@ function layout() {
  const oldScale=h*.65/o.height*c.headScale*c.zoom
  old.scale.set(oldScale);old.position.set(w/2-o.width*oldScale/2+c.headX*h/1000*c.zoom,h*.03+(h*.01+c.headY*h/1000)*c.zoom)
  headOrigin={x:old.x,y:old.y}
- if(mode==='old'){old.visible=true;body.visible=false;old.scale.set(h*.9/o.height);old.position.set(w/2-old.width/2,h*.03)}
+ if(mode==='old' || mode==='old-clean'){old.visible=true;body.visible=false;old.scale.set(h*.9/o.height*c.zoom);old.position.set(w/2-old.width/2,h*.03)}
  else if(mode==='body'){old.visible=false;body.visible=true}
  else {old.visible=true;body.visible=true}
  models.back.visible=mode==='compose';models.back.scale.copyFrom(old.scale);models.back.position.copyFrom(old.position)
@@ -77,13 +81,14 @@ async function main() {
   })
   const draw=internal.draw.bind(internal)
   internal.draw=gl=>{
-   if(mode!=='compose'){draw(gl);return}
+   const mask=mode==='compose'?hidden[name]:mode==='old-clean' && name==='old'?cleanHidden:null
+   if(!mask){draw(gl);return}
    const drawable=core._model.drawables,saved=drawable.opacities.slice()
-   for(let i=0;i<drawable.count;i++)if(hidden[name].has(drawable.ids[i]))drawable.opacities[i]=0
+   for(let i=0;i<drawable.count;i++)if(mask.has(drawable.ids[i]))drawable.opacities[i]=0
    try{draw(gl)}finally{drawable.opacities.set(saved)}
   }
  }
- window.preview={models,hidden,layout,bounds,setMode:value=>{mode=value;document.querySelector('#mode').value=value;layout()},
+ window.preview={models,hidden,cleanHidden,layout,bounds,setMode:value=>{mode=value;document.querySelector('#mode').value=value;layout()},
   setAction:(value,time=null)=>{action=value;fixedTime=time},dump:()=>Object.fromEntries(Object.entries(models).map(([name,m])=>[name,{width:m.internalModel.width,height:m.internalModel.height,
    parameters:m.internalModel.coreModel._model.parameters.ids.map((id,i)=>({id,min:m.internalModel.coreModel._model.parameters.minimumValues[i],max:m.internalModel.coreModel._model.parameters.maximumValues[i]})),
    drawables:m.internalModel.getDrawableIDs().map((id,i)=>({id,...bounds(m,i),opacity:m.internalModel.coreModel.getDrawableOpacity(i)}))}]))}
@@ -99,7 +104,7 @@ async function main() {
    models.old.position.set(headOrigin.x+dx,headOrigin.y+dy);models.back.position.copyFrom(models.old.position)
   }
  })
- layout();layerList();status.textContent='独立拼接预览 · 尚未替换正式角色';window.preview.ready=true
+ layout();layerList();status.textContent='独立形象预览 · 尚未替换正式角色';window.preview.ready=true
 }
 document.querySelector('#mode').onchange=e=>{mode=e.target.value;layout()}
 for(const id of Object.keys(defaults))document.getElementById(id).oninput=layout
