@@ -26,7 +26,7 @@ import { RoomJournal } from './room-journal.mjs'
 import { Scene } from './scene.mjs'
 import { Hosting } from './hosting.mjs'
 import { Participation } from './participation.mjs'
-import { planParticipation } from './participation-model.mjs'
+import { planParticipation, ParticipationError } from './participation-model.mjs'
 import { streamParticipation } from './participation-stream.mjs'
 import { BilibiliLive } from './bilibili.mjs'
 import { BlivechatRelay, blivechatConfig } from './blivechat.mjs'
@@ -373,7 +373,7 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
           send({ type: 'cancelled', entry: { ...answerEntry }, session: answerSession })
         }
       } catch (error) {
-        const message = error.name === 'TimeoutError' ? '模型响应超时，请稍后重试' : '模型调用失败，请检查服务端密钥、额度和网络'
+        const message = error instanceof ParticipationError && error.code==='arguments' ? error.explanation : error.name === 'TimeoutError' ? '模型响应超时，请稍后重试' : '模型调用失败，请检查服务端密钥、额度和网络'
         updateAnswer({ status: turn.controller.signal.aborted ? 'cancelled' : 'failed', error: turn.controller.signal.aborted ? undefined : message })
         send({ type: turn.controller.signal.aborted ? 'cancelled' : 'error', message, entry: { ...answerEntry }, session: answerSession })
       } finally {

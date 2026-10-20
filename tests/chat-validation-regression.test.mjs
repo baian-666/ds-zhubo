@@ -67,3 +67,18 @@ test('operators see the failing reply part without upstream content or a content
   assert.equal(entry.error,'text:too_long')
   assert.equal(director.candidate,null)
 })
+
+test('consuming a prepared reply before its first audio never inserts an absent timestamp',async t=>{
+  const scheduler=new Scheduler(),director=new Director({scheduler}),scene=new Scene()
+  const participation=new Participation({scheduler,director,scene,enabled:true,debounceMs:1,plan:async()=>reply,
+    prepareSpeech:()=>({startedAt:Date.now(),close(){}})})
+  t.after(()=>{participation.close();director.close()})
+  director.event({type:'mode',value:'auto'})
+  director.event({type:'speech-start',utterance:1});director.event({type:'transcript',utterance:1,text:'说说你的感受。',final:true});director.event({type:'speech-end',utterance:1})
+  await participation.run()
+  const turn=director.consume(director.candidate.id)
+  assert.ok(turn)
+  assert.equal(Number.isSafeInteger(turn.timings.ttsPreparedAt),true)
+  assert.equal(Object.hasOwn(turn.timings,'preparedFirstPcmAt'),false)
+  scheduler.finish(turn)
+})

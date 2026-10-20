@@ -182,6 +182,9 @@ onUnmounted(() => {
           <span :class="['i-solar-alt-arrow-right-linear']" />
         </Button>
       </header>
+      <p v-if="state?.sessionMemory?.error" role="alert" :class="['shrink-0 rounded-lg px-3 py-2 text-sm', 'bg-orange-100 text-orange-900 dark:bg-orange-950 dark:text-orange-100']">
+        {{ t('sessionMemoryError') }}
+      </p>
       <div :class="['flex shrink-0 items-center justify-between gap-2']">
         <p role="status" :class="['text-xs text-neutral-500 dark:text-neutral-400']">
           {{ activity }}

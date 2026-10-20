@@ -10,8 +10,19 @@ import { parseContinuation, continuationToolSchema, continuityPrompt } from './s
 import { directorManual, parseCoaching, coachingToolSchema } from './director-handbook.mjs'
 
 const actions = ['wait','reply_host','reply_viewer','reply_followup','reply_program','react','stop']
+const errorFields={action:'接话方式',hostIntent:'接话来源',text:'回复文字',targetId:'观众编号',platform:'观众平台',thoughtId:'待续事项编号',floorIntent:'插话意图',yieldToHost:'交棒判断',record:'回复片段',kind:'回复片段类型',records:'回复分段'}
+const errorIssues={invalid:'有误',missing:'缺失',too_long:'过长',conflict:'前后不一致'}
 export class ParticipationError extends Error {
-  constructor(code) { super(`Participation request failed: ${code}`); this.code=code }
+  constructor(code,field,issue='invalid') {
+    super(`Participation request failed: ${code}`); this.code=code
+    // Store only known diagnostic labels, never model output or provider errors.
+    this.field=Object.hasOwn(errorFields,field)?field:undefined
+    this.issue=Object.hasOwn(errorIssues,issue)?issue:'invalid'
+  }
+  get explanation() {
+    const detail=this.field?`（${errorFields[this.field]}${errorIssues[this.issue]}）`:''
+    return `程序没能读懂这次回复的格式${detail}，这次回复已中止；可以继续说话。`
+  }
 }
 // Optional animation must never turn a valid spoken answer into a failed turn.
 export function normalizePerformance(args) {
@@ -38,24 +49,39 @@ export function parseParticipation(message) {
   if (message?.tool_calls?.length !== 1 || message.tool_calls[0].function?.name !== 'participate') throw new ParticipationError('tool')
   let args
   try { args=JSON.parse(message.tool_calls[0].function.arguments) } catch { throw new ParticipationError('json') }
-  if (!args || Array.isArray(args) || typeof args !== 'object') throw new ParticipationError('arguments')
-  if (!['invited','spontaneous','none'].includes(args.hostIntent) || !actions.includes(args.action) || typeof args.reason !== 'string' || !args.reason.trim() || args.reason.length > 180 ||
-    typeof args.text !== 'string' || args.text.length > 800 ||
-    typeof args.targetId !== 'string' || args.targetId.length > 128 ||
-    typeof args.platform !== 'string' || args.platform.length > 20) throw new ParticipationError('arguments')
-  const allowed=['action','hostIntent','reason','text','targetId','platform','performance','motion','components','thought','thoughtId','stickerId','continuation','speechStyle','hostingIntent','hostingTopic','hostingPace','revisitAfterSeconds','yieldToHost','floorIntent','coaching','hostingControl']
-  if (Object.keys(args).some(key=>!allowed.includes(key))) throw new ParticipationError('arguments')
-  if(args.floorIntent!==undefined && !['backchannel','takeover','uncertain'].includes(args.floorIntent))throw new ParticipationError('arguments')
-  if(args.yieldToHost!==undefined && (typeof args.yieldToHost!=='boolean' || (args.yieldToHost && !['wait','stop'].includes(args.action))))throw new ParticipationError('arguments')
-  if (args.action.startsWith('reply_') && !args.text.trim()) throw new ParticipationError('arguments')
-  if (!args.action.startsWith('reply_') && args.action !== 'react' && args.text) throw new ParticipationError('arguments')
-  if (args.action === 'react' && (args.text.length > 40 || args.hostIntent !== 'none')) throw new ParticipationError('arguments')
-  if(args.action==='reply_program' && (args.hostIntent!=='spontaneous' || args.targetId || args.platform))throw new ParticipationError('arguments')
-  if (args.action==='reply_followup' && (args.hostIntent!=='spontaneous' || !Number.isSafeInteger(args.thoughtId) || args.thoughtId<1 || args.targetId || args.platform))throw new ParticipationError('arguments')
+  if (!args || Array.isArray(args) || typeof args !== 'object') throw new ParticipationError('arguments','record')
+  const invalid=(field,issue)=>{throw new ParticipationError('arguments',field,issue)}
+  if(!actions.includes(args.action))invalid('action')
+  if(!['invited','spontaneous','none'].includes(args.hostIntent))invalid('hostIntent')
+  if(typeof args.text!=='string')invalid('text','missing')
+  if(args.text.length>800)invalid('text','too_long')
+  // Host speech has no audience route. Missing empty route fields and an
+  // optional explanation must not prevent a valid answer. Unknown fields are
+  // never copied into the returned action, so they cannot execute anything.
+  if(args.action==='reply_viewer') {
+    if(typeof args.targetId!=='string'||!args.targetId.trim())invalid('targetId','missing')
+    if(args.targetId.length>128)invalid('targetId','too_long')
+    if(typeof args.platform!=='string'||!args.platform.trim())invalid('platform','missing')
+    if(args.platform.length>20)invalid('platform','too_long')
+  }
+  const targetId=args.action==='reply_viewer'?args.targetId:''
+  const platform=args.action==='reply_viewer'?args.platform:''
+  const reason=typeof args.reason==='string'&&args.reason.trim()?args.reason.trim().slice(0,180):'根据当前现场决定。'
+  if(args.floorIntent!==undefined && !['backchannel','takeover','uncertain'].includes(args.floorIntent))invalid('floorIntent')
+  if(args.yieldToHost!==undefined && (typeof args.yieldToHost!=='boolean' || (args.yieldToHost && !['wait','stop'].includes(args.action))))invalid('yieldToHost')
+  if (args.action.startsWith('reply_') && !args.text.trim()) invalid('text','missing')
+  if (!args.action.startsWith('reply_') && args.action !== 'react' && args.text) invalid('text','conflict')
+  if (args.action === 'react' && args.text.length > 40)invalid('text','too_long')
+  if (args.action === 'react' && args.hostIntent !== 'none')invalid('hostIntent','conflict')
+  if(args.action==='reply_program' && args.hostIntent!=='spontaneous')invalid('hostIntent','conflict')
+  if(args.action==='reply_followup') {
+    if(args.hostIntent!=='spontaneous')invalid('hostIntent','conflict')
+    if(!Number.isSafeInteger(args.thoughtId)||args.thoughtId<1)invalid('thoughtId')
+  }
   const thought=['wait','react'].includes(args.action)?parseThought(args.thought):null
   const animation=normalizePerformance(args)
   if(args.thought!==undefined && !thought)animation.warnings.push('thought_dropped')
-  return {action:args.action,yieldToHost:args.yieldToHost,floorIntent:args.floorIntent,hostIntent:args.hostIntent,reason:args.reason.trim(),text:args.text.trim(),
+  return {action:args.action,yieldToHost:args.yieldToHost,floorIntent:args.floorIntent,hostIntent:args.hostIntent,reason,text:args.text.trim(),
     hostingControl:['start','pause'].includes(args.hostingControl)?args.hostingControl:undefined,
     hostingIntent:['lead','support','listen'].includes(args.hostingIntent)?args.hostingIntent:undefined,
     ...hostingPlan(args,args.action.startsWith('reply_')),
@@ -63,7 +89,7 @@ export function parseParticipation(message) {
     speechStyle:normalizeSpeechStyle(args.speechStyle),
     continuation:parseContinuation(args.continuation)??undefined,coaching:parseCoaching(args.coaching),
     stickerId:typeof args.stickerId==='string' ? args.stickerId : undefined,
-    targetId:args.targetId,platform:args.platform,thought:thought??undefined,thoughtId:args.thoughtId,...animation}
+    targetId,platform,thought:thought??undefined,thoughtId:args.thoughtId,...animation}
 }
 
 const hostingPrompt = `
@@ -161,8 +187,8 @@ ${snapshot.answerPreparation ? `本次完整回答草稿任务替换上面的实
           motion:{...motionSequenceSchema(profile?.capabilities ?? emptyCapabilities()),description:'按聊天语境自主选择的具体表情或动作；有合适的细致态度时使用，不只用于被要求表演。普通平静回应省略，不每句话做动作。'},
           thought:{type:'object',properties:{text:{type:'string',maxLength:120},wake:{type:'string',enum:['next_host_turn','after_reply']}},required:['text','wake'],additionalProperties:false},
           thoughtId:{type:'integer',minimum:1},
-          performance:{type:'string',enum:profile?.capabilities?.presets ?? ['idle'],description:'基础姿态快捷项。先按语境判断是否需要表达，再选具体表情；更细的态度用motion中的命名表情，不都折成smile/pout。'},action:{type:'string',enum:offeredActions},hostIntent:{type:'string',enum:['invited','spontaneous','none']},reason:{type:'string'},text:{type:'string'},targetId:{type:'string'},platform:{type:'string'}
-        },required:['performance',...(snapshot.active && snapshot.hostOpportunity && !snapshot.listeningOpportunity?['yieldToHost']:[]),'action','hostIntent','reason','text','targetId','platform'],additionalProperties:false}}}],
+          performance:{type:'string',enum:profile?.capabilities?.presets ?? ['idle'],description:'基础姿态快捷项。先按语境判断是否需要表达，再选具体表情；更细的态度用motion中的命名表情，不都折成smile/pout。'},action:{type:'string',enum:offeredActions},hostIntent:{type:'string',enum:['invited','spontaneous','none']},reason:{type:'string',maxLength:180},text:{type:'string',maxLength:800},targetId:{type:'string',maxLength:128,description:'仅reply_viewer填写当前观众编号；其他行动省略。'},platform:{type:'string',maxLength:20,description:'仅reply_viewer填写当前观众平台；其他行动省略。'}
+        },required:[...(snapshot.active && snapshot.hostOpportunity && !snapshot.listeningOpportunity?['yieldToHost']:[]),'action','hostIntent','text'],additionalProperties:false}}}],
       tool_choice:{type:'function',function:{name:'participate'}}
     }
 }

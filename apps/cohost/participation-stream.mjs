@@ -5,7 +5,7 @@ import { hostingClosingSchema, continuousClosingSchema, parseHostingClosing, hos
 import { directorInformationTools } from './director-tools.mjs'
 import { defaultPersona } from './runtime-profile.mjs'
 
-const fail = code => { throw new ParticipationError(code) }
+const fail = (code,field,issue) => { throw new ParticipationError(code,field,issue) }
 
 // Only complete objects leave this decoder. Strings, escapes and nested motion frames
 // can cross any network boundary. The envelope has one field and a bounded record list.
@@ -18,7 +18,7 @@ export class ParticipationRecords {
     return (this.arrayClosed ? /^\s*\}\s*\}?\s*$/ : /^\s*\}\s*$/).test(this.buffer)
   }
   push(text) {
-    if (typeof text !== 'string' || (this.size += text.length) > 24000) fail('arguments')
+    if (typeof text !== 'string' || (this.size += text.length) > 24000) fail('arguments','records','too_long')
     this.buffer += text
     const records = []
     while (true) {
@@ -62,7 +62,7 @@ export class ParticipationRecords {
           }
         }
         if (!complete) break
-        if (++this.count > 10) fail('arguments')
+        if (++this.count > 10) fail('arguments','records','too_long')
         let record
         try { record = JSON.parse(this.buffer.slice(0, this.offset)) } catch { fail('json') }
         records.push(record)
@@ -286,19 +286,26 @@ export async function streamParticipation(snapshot, {signal,apiKey,model,profile
       first={done:false,value:{kind:'answer',hostIntent:first.value.hostIntent,text:opening.text}}
     }
     if(first.value?.kind==='answer') {
-      if(!compactHostAnswer(snapshot) || Object.keys(first.value).some(key=>!['kind','hostIntent','text','reason'].includes(key)) ||
-        !['invited','spontaneous'].includes(first.value.hostIntent) || typeof first.value.text!=='string' || first.value.text.length>24 ||
-        (first.value.reason!==undefined && (typeof first.value.reason!=='string' || first.value.reason.length>40)))fail('arguments')
-      first={done:false,value:{...first.value,reason:first.value.reason??'回应主播当前内容。',kind:'decision',action:'reply_host',targetId:'',platform:''}}
+      const answer=first.value
+      if(!compactHostAnswer(snapshot))fail('arguments','action','conflict')
+      if(!['invited','spontaneous'].includes(answer.hostIntent))fail('arguments','hostIntent')
+      if(typeof answer.text!=='string'||!answer.text.trim())fail('arguments','text','missing')
+      if(answer.text.length>24)fail('arguments','text','too_long')
+      if((answer.action!==undefined&&answer.action!=='reply_host')||answer.targetId||answer.platform||
+        ['hostingControl','yieldToHost','floorIntent','thoughtId','continuation','coaching'].some(key=>answer[key]!==undefined))fail('arguments','action','conflict')
+      // Only the fixed host-reply fields leave this compact form. Decorative
+      // extras do not stop speech and cannot add a control or audience route.
+      first={done:false,value:{kind:'decision',action:'reply_host',hostIntent:answer.hostIntent,text:answer.text,
+        reason:answer.reason??'回应主播当前内容。',targetId:'',platform:''}}
     }
-    if (first.done || first.value?.kind !== 'decision') fail('arguments')
+    if (first.done || first.value?.kind !== 'decision') fail('arguments','kind')
     const {kind, ...args} = first.value
     const result = parseParticipation({tool_calls:[{function:{name:'participate',arguments:JSON.stringify(args)}}]})
     if (!result.action.startsWith('reply_')) {
-      if (!(await iterator.next()).done) fail('arguments')
+      if (!(await iterator.next()).done) fail('arguments','record','conflict')
       close(); return result
     }
-    if (result.text.length > 160) fail('arguments')
+    if (result.text.length > 160) fail('arguments','text','too_long')
     let total = result.text.length, closing=null
     const closingRequired=['running','observing'].includes(snapshot.hosting?.state) && !snapshot.listeningOpportunity
     const replyStream = {
@@ -319,9 +326,10 @@ export async function streamParticipation(snapshot, {signal,apiKey,model,profile
               // Some providers repeat routing fields on each record. They can
               // confirm the first decision, but cannot change its authority.
               for (const key of ['action','hostIntent','targetId','platform','thoughtId']) {
-                if (record[key] !== undefined && record[key] !== result[key]) fail('arguments')
+                if (record[key] !== undefined && record[key] !== result[key]) fail('arguments',key,'conflict')
               }
-              if (typeof record.text !== 'string' || !record.text.trim() || record.text.length > 160 || (total += record.text.length) > 800) fail('arguments')
+              if (typeof record.text !== 'string' || !record.text.trim()) fail('arguments','text','missing')
+              if(record.text.length > 160 || (total += record.text.length) > 800) fail('arguments','text','too_long')
               let text=record.text.trim()
               if(firstContinuation && openingId!==undefined) {
                 // Only remove an exact repeated lead at a punctuation boundary.
@@ -343,7 +351,7 @@ export async function streamParticipation(snapshot, {signal,apiKey,model,profile
               closingSeen=true
               closingDraft=parseHostingClosing(record,{continuous:Boolean(snapshot.hosting?.continuous)})
               if(!closingDraft)closingInvalid=true
-            } else fail('arguments')
+            } else fail('arguments','kind')
           }
           // Commit only after a successful provider finish. Cancellation or a
           // truncated stream cannot authorize a later autonomous wakeup.

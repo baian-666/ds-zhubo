@@ -322,7 +322,7 @@ test('wait and react remain atomic and cannot hide later speech',async()=>{
 })
 
 test('invalid decisions never start speech and cancellation releases an unread stream',async()=>{
-  for(const record of [{...decision,action:'shell'},{...decision,text:''},{...decision,text:'字'.repeat(161)},{...decision,extra:'forbidden'}]) {
+  for(const record of [{...decision,action:'shell'},{...decision,text:''},{...decision,text:'字'.repeat(161)},{...decision,hostIntent:'invented'}]) {
     const u=upstream(),pending=streamParticipation({}, {fetchImpl:u.fetchImpl})
     u.args(JSON.stringify({records:[record]}));u.finish()
     await assert.rejects(pending,/arguments/)
@@ -332,6 +332,21 @@ test('invalid decisions never start speech and cancellation releases an unread s
   const result=await pending;result.replyStream.close();await delay(0)
   assert.equal(u.cancelled,true)
   await assert.rejects(async()=>{for await(const record of result.replyStream)void record})
+})
+
+test('host reply formatting extras cannot block speech or grant controls, and bad speech has a precise diagnostic',async()=>{
+  for(const record of [{kind:'answer',hostIntent:'invited',text:'这次接上了。',reason:'解释'.repeat(100),note:'extra'},
+    {...decision,targetId:undefined,platform:undefined,reason:undefined,executeCommand:'ignored'}]) {
+    const u=upstream(),pending=streamParticipation({hostOpportunity:true},{fetchImpl:u.fetchImpl})
+    u.args(JSON.stringify({records:[record]}));u.finish()
+    const result=await pending
+    const spoken=await Array.fromAsync(result.replyStream)
+    assert.equal(spoken[0].text,record.text)
+    assert.equal(result.executeCommand,undefined);assert.equal(result.hostingControl,undefined)
+  }
+  const u=upstream(),pending=streamParticipation({}, {fetchImpl:u.fetchImpl})
+  u.args(JSON.stringify({records:[{...decision,text:'字'.repeat(161)}]}));u.finish()
+  await assert.rejects(pending,error=>error.code==='arguments'&&error.field==='text'&&error.issue==='too_long')
 })
 
 test('late duplicate decisions, extra tools, truncated output and oversized text fail closed',async()=>{

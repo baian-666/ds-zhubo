@@ -263,7 +263,7 @@ test('invalid optional actions preserve speech; misplaced components use full sa
  for(const motion of [null,[],{label:'坏结构',frames:{0:{pose:{}}}}]) {
   const result=parse(action('reply_host',{motion,components:{peace:1}}));assert.equal(result.text,action().text);assert.equal(result.motion,undefined)
  }
- assert.throws(()=>parse({...action(),executeCommand:'unsafe'}),error=>error.code==='arguments')
+ assert.equal(parse({...action(),executeCommand:'unsafe'}).executeCommand,undefined)
  for(const args of [null,[],{...action(),text:''}])assert.throws(()=>parse(args))
 })
 

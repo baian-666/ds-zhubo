@@ -17,7 +17,7 @@ const errorMessages={
   truncated:'这次决定输出被截断，没拿到完整结果；下一句再试。',
   tool:'这次没有收到有效的行动决定；下一句再试。',
   json:'这次决定的格式无法解析；下一句再试。',
-  arguments:'这次决定的字段不合规，未执行；下一句再试。',
+  arguments:'程序没能读懂这次回复的格式，这次回复已中止；可以继续说话。',
   unknown:'这次调用或结果处理出错，我先听着；下一句再试。',
 }
 // Human input uses one generation. Quiet continuous hosting first observes without speaking.
@@ -326,7 +326,8 @@ export class Participation {
         const code=job.timedOut?'timeout':error instanceof ParticipationError && Object.hasOwn(errorMessages,error.code)?error.code:'unknown'
         if(snapshot.programOpportunity)this.hosting?.failed(code)
         this.director.record('hold',code==='timeout'?'participation_timeout':'participation_error',
-          {explanation:errorMessages[code],errorCode:code})
+          {explanation:code==='arguments'&&error instanceof ParticipationError?error.explanation:errorMessages[code],errorCode:code,
+            ...(code==='arguments'&&error.field?{error:`${error.field}:${error.issue}`}:{})})
       }
     } finally {
       job.prepared?.speech?.close()
@@ -485,7 +486,7 @@ export class Participation {
     const d=this.director,s=this.scheduler,u=d.utterance
     if (!result || !['wait','reply_host','reply_viewer','reply_followup','reply_program','react','stop'].includes(result.action) ||
       typeof result.reason!=='string' || !result.reason.trim() || result.reason.length>180 ||
-      typeof result.text!=='string' || result.text.length>400) throw new Error('Invalid action')
+      typeof result.text!=='string' || result.text.length>800) throw new Error('Invalid action')
     if(result.action==='wait' && result.yieldToHost===true && snapshot.active)result={...result,action:'stop'}
     // A semantic stop owns only the current host input and the output it observed.
     // An already finished output still permits holding the floor, never cancelling a newer one.

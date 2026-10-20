@@ -2,14 +2,15 @@ import test from 'node:test'
 import { request } from 'node:http'
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, realpathSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, realpathSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { parseEnv } from 'node:util'
 import { saveBilibiliConfig, createBilibiliSetup } from '../scripts/configure-bilibili.mjs'
 import { createApp } from '../apps/cohost/server.mjs'
 function temp(t) {
-  const root = resolve('data'),
-    dir = mkdtempSync(join(root, 'bili-test-'))
+  const root = resolve('data')
+  mkdirSync(root, { recursive: true })
+  const dir = mkdtempSync(join(root, 'bili-test-'))
   t.after(() => {
     assert.ok(realpathSync(dir).startsWith(root + sep))
     rmSync(dir, { recursive: true, force: true })

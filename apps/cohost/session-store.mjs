@@ -138,7 +138,12 @@ export class SessionStore {
     } catch(error) {this.db.exec('ROLLBACK');throw error}
   }
   save(snapshot) {
-    const payload = JSON.stringify(v.parse(schema,snapshot))
+    // Timing diagnostics are not conversation data. Unfinished audio has no
+    // first-PCM timestamp, and preparation flags are not numeric timings.
+    // Omit those values before validating; keep chat and memory validation strict.
+    const room={...snapshot.room,entries:snapshot.room.entries.map(entry=>entry.timings===undefined?entry:{...entry,
+      timings:Object.fromEntries(Object.entries(entry.timings).filter(([key,value])=>key.length<=64 && Number.isSafeInteger(value) && value>=0))})}
+    const payload = JSON.stringify(v.parse(schema,{...snapshot,room}))
     if (Buffer.byteLength(payload)>2_000_000) throw new Error('Session checkpoint exceeded limit')
     const at = Date.now()
     this.db.exec('BEGIN IMMEDIATE')

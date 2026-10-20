@@ -9,6 +9,7 @@
 
 当前源码保存在 [GitHub 仓库](https://github.com/baian-666/ds-zhubo)。
 移除网页版之前的源码标签为 `snapshot-20261020-before-desktop-only`。
+完整校验后的桌面源码使用 [snapshot-20261020-desktop-only-verified](https://github.com/baian-666/ds-zhubo/tree/snapshot-20261020-desktop-only-verified)。
 完整的本机版本另用 `保存项目版本.cmd` 保存，包含源码、数据库与桌面构建，具体编号和恢复步骤见 [版本存档](docs/VERSIONS.md)。
 
 GitHub 不包含 `.env`、聊天数据库、桌面导入模型、外置语音模型、安装依赖和本机存档。换电脑需要单独准备这些材料，不能只克隆代码就当作整机恢复。

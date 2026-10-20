@@ -16,6 +16,7 @@ Use `docs/README.md` to choose a topic only when STATUS is insufficient. Read `d
 - Before a behavior change or deployment, save a checkpoint with the pinned Node: `node scripts/version-checkpoint.mjs create before-<change>`. After verification/deployment, save another with a meaningful label and record its ID and validation scope in the relevant topic document.
 - See `docs/VERSIONS.md` for the inventory and recovery steps. A successful checkpoint includes the current working tree, SQLite online backup, current/previous desktop artifacts, and dependency lock files. It does not prove the source and running services match or that a full restore was tested.
 - Never equate a test report, Git HEAD, desktop build ID, or database backup alone with a complete project version. Preserve new/uncommitted files and keep secrets out of source archives.
+- Before uploading a shared working directory, freeze a checkpoint and test an independent copy. Commit that exact source set, not files added later during parallel work. Metadata-only updates can follow verification. Do not combine a new regression test with an earlier implementation by blindly staging the live tree.
 - Checkpoint archives are local and ignored by Git. Do not delete archived desktop artifacts during disk cleanup. Keep credentials, desktop profile/imported models, external voice models, and off-device backups as explicit separate recovery requirements.
 
 - This project builds a Chinese live-stream cohost with AIRI and DeepSeek.

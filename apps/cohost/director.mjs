@@ -263,7 +263,8 @@ export class Director {
       if (turn.replyStream) turn.controller.signal.addEventListener('abort',()=>turn.replyStream.close(),{once:true})
       turn.preparedSpeech=candidate.preparedSpeech
       if(turn.preparedSpeech) {
-        turn.timings={...turn.timings,ttsPreparedAt:turn.preparedSpeech.startedAt,preparedFirstPcmAt:turn.preparedSpeech.firstPcmAt}
+        turn.timings={...turn.timings,ttsPreparedAt:turn.preparedSpeech.startedAt,
+          ...(Number.isSafeInteger(turn.preparedSpeech.firstPcmAt)?{preparedFirstPcmAt:turn.preparedSpeech.firstPcmAt}:{})}
         turn.controller.signal.addEventListener('abort',()=>turn.preparedSpeech.close(),{once:true})
       }
       return turn
