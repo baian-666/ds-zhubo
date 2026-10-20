@@ -1,12 +1,12 @@
 # AIRI 本机直播入口
 
-更新：2026-10-14。日常使用桌面端，网页作为备用。
+当前入口更新：2026-10-20，仅使用桌面端。下方日期章节保留当时的双端测试证据，不代表仍提供网页版。
 
 ## 打开与使用
 
 在项目目录双击 `启动小鲸鱼.cmd`。它复用已有直播服务和桌面窗口，缺少服务时自动启动，不清空运行中的场次。日常启动改为固定构建，不再现场编译；更新、回退及运行边界见 [固定桌面构建](DESKTOP-BUILD.md)。尚未制作可分发安装包。
 
-网页备用双击 `启动网页版.cmd`，或在服务已启动时打开 http://127.0.0.1:5173/?cohost 。网页版使用同一侧栏与直播服务。
+独立网页启动器、5173 开发入口和旧 8787 浏览器控制台已移除；8787 保留桌面后端 API。共享 Vue 组件和浏览器回归夹具保留。
 
 日常操作：
 
@@ -48,7 +48,7 @@
 
 ## 开发与复现
 
-固定端口：直播服务 127.0.0.1:8787，网页 127.0.0.1:5173，桌面 localhost:5174，桌面调试仅在回环 9250。
+固定端口：后端 API 127.0.0.1:8787，桌面 localhost:5174，桌面调试仅在回环 9250。
 
 桌面固定使用原来的 localhost 地址，保留原有角色数据库。独立启动不会再占用网页端口。窗口初始大小受显示器工作区限制，侧栏不再压在角色上。
 
@@ -59,12 +59,11 @@
 ```powershell
 ./scripts/local.ps1 check
 ./scripts/local.ps1 test
-# 两个舞台启动后，使用已安装的 Playwright 运行：
-node scripts/native-console-smoke.mjs
-node scripts/native-settings-smoke.mjs
+# 桌面启动后，使用已安装的 Playwright 运行：
+node scripts/desktop-smoke.mjs
 ```
 
-console-smoke 使用同一个模拟后端检查实际网页与 Electron 的聊天同步；settings-smoke 只读取实际后端，检查桌面设置导航和网页共享设置页。设置 PLAYWRIGHT_MODULE 可指定本机安装的 Playwright 模块。截图和结果保存在忽略的 data 目录，不采集真人麦克风。具体检查结果与全仓依赖阻塞见 STATUS 最新记录。
+desktop-smoke 检查实际 Electron 窗口、原生设置、模型画布和重复启动复用。早期 native-console/native-settings 的双端脚本保留作历史开发材料，不是当前验收入口。设置 PLAYWRIGHT_MODULE 可指定本机安装的 Playwright 模块。截图和结果在忽略的 data 目录；具体检查范围见 STATUS。
 
 启动日志位于 `data/start-desktop.log`、`data/start-web.log` 及对应服务日志。`scripts/stop-local.ps1` 通过保存的 PID 和入口身份检查停止服务。服务端仍是进程内场次，重启前需备份聊天；长期记忆、正式直播平台和安装包继续后置。
 

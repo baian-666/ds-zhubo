@@ -6,8 +6,8 @@ import { performanceContracts, performanceSource } from './performance-overlay.m
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const vendor = join(root, 'vendor/airi')
-const web = spawnSync(process.execPath, [join(root, 'scripts/patch-airi.mjs')], {cwd:root,stdio:'inherit'})
-if (web.status !== 0) throw new Error('Web overlay validation failed')
+const shared = spawnSync(process.execPath, [join(root, 'scripts/patch-airi.mjs')], {cwd:root,stdio:'inherit'})
+if (shared.status !== 0) throw new Error('Shared overlay validation failed')
 const appRoot = join(vendor, 'apps/stage-tamagotchi')
 const savedRoot = join(root, 'data/airi-desktop-overlay')
 // A release contains Electron's package.json, but it is not a pnpm workspace.

@@ -8,10 +8,9 @@
     }
   },
   "remoteUser": "vscode",
-  "forwardPorts": [8787, 5173],
+  "forwardPorts": [8787],
   "portsAttributes": {
-    "8787": { "label": "助播文字联调台", "onAutoForward": "notify", "visibility": "private" },
-    "5173": { "label": "AIRI 舞台", "onAutoForward": "notify", "visibility": "private" }
+    "8787": { "label": "桌面后端 API", "onAutoForward": "silent", "visibility": "private" }
   },
   "postCreateCommand": "npm run check && npm test",
   "customizations": {

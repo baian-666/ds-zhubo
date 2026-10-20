@@ -1,29 +1,11 @@
-# 助播本机文字虚拟直播间
+# 桌面助播后端
 
-本机启动、导演模式对照与验收边界见 [文字虚拟直播间](../../docs/TEXT-ROOM.md)。页面默认真实 DeepSeek，真实密钥仅保存在忽略的 .env。没有密钥时可选择模拟回复。
+这是 AIRI 桌面使用的本机 API 服务，入口为 `server.mjs`。独立网页版和旧浏览器控制台已移除。
 
-`npm run dev` 启动单场次联调服务和网页。代码没有引入额外第三方运行时依赖。
+- `/healthz` 提供存活检查；`/api/` 提供角色、配置、聊天、导演、识别、播放和状态流接口。
+- `/`、`/index.html`、`/client.mjs`、`/stage-bridge.mjs` 不再提供页面或脚本。
+- 模型凭据仅留本机环境；SQLite、日志和录音在忽略的 `data/`，不随 Git 上传。
+- API 中已有的舞台类型与来源校验仍供共享组件及回归使用，不代表独立网页版仍受支持。
 
-| 文件 | 作用 |
-|---|---|
-| `scheduler.mjs` | 主播优先、取消信号、消息队列、去重与冷却 |
-| `director.mjs` | 快速话轮判断、异步语义接口、候选过期与主动参与预算 |
-| `deepseek.mjs` | 服务端 DeepSeek 流式调用与 SSE 解析 |
-| `server.mjs` | HTTP 输入验证、权限、短期上下文与响应流 |
-| `index.html` | 手动模拟主播与观众事件 |
-
-所有 `/api/` 路由在设置访问令牌后要求 `Authorization: Bearer <COHOST_ACCESS_TOKEN>`。POST 使用 `application/json`。只有 `/` 与 `/healthz` 不要求令牌。
-
-| 路由 | 请求 |
-|---|---|
-| `GET /api/status` | 无请求体 |
-| `POST /api/reply` | `{ "source": "host", "text": "你好" }` 或 `{ "source": "viewer" }` |
-| `POST /api/host-speaking` | `{ "value": true }`，开始讲话并打断；false 表示结束讲话 |
-| `POST /api/mute` | `{ "value": true }` |
-| `POST /api/interrupt` | `{}` |
-| `POST /api/reset` | `{}`，清上下文与队列，保留限流状态 |
-| `POST /api/danmaku` | `{ "id": "1", "platform": "bilibili", "userId": "viewer-1", "text": "你怎么看", "mentioned": true, "selected": false }` |
-
-回复流为 NDJSON，事件有 `start`、`delta`、`done`、`cancelled`、`error`，均携带话轮和音频标识。文字模式保留原流程；`delivery:audio` 在生成结束后等待实际播放回执，尚未接真实音频。新增 `/api/director/event` 和 `/api/playback`，协议、模拟方式及局限见 [话轮导演](../../docs/TURN-DIRECTOR.md)。
-
-此原型不适合直接公开提供多人服务，不包含平台连接器、自动语义评分、持久化或播出内容审核流程。
+日常通过根目录 `启动小鲸鱼.cmd` 启动。开发入口为 `npm run dev`，检查为 `npm run check` 与 `npm test`。
+自然话轮、识别和长期记忆的实际限制见 [当前状态](../../docs/STATUS.md)，存档/恢复见 [版本管理](../../docs/VERSIONS.md)。

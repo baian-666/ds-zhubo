@@ -96,14 +96,11 @@ test('mock mode needs no key and cannot enter real model history',async t=>{
   assert.equal((await r.post('/api/reply',{source:'host',text:'x',engine:'other'})).status,400)
   assert.equal((await r.post('/api/reply',{source:'host',text:'x',engine:'mock',delivery:'audio'})).status,400)
 })
-test('room assets load with a restrictive stage frame policy and missing key is local guidance',async t=>{
+test('desktop backend exposes health and APIs without the removed browser console',async t=>{
   const r=await serve(t,{})
-  const page=await r.get('/')
-  assert.match(page.headers.get('Content-Security-Policy'),/frame-src http:\/\/127.0.0.1:5173/)
-  assert.match(await page.text(),/人工导演/)
-  const script=await r.get('/client.mjs')
-  assert.equal(script.status,200)
-  assert.match(script.headers.get('Content-Type'),/javascript/)
+  for (const path of ['/','/index.html','/client.mjs','/stage-bridge.mjs'])
+    assert.equal((await r.get(path)).status,404)
+  assert.deepEqual(await (await r.get('/healthz')).json(),{ok:true})
   const response=await r.post('/api/reply',{source:'host',text:'你好'})
   assert.match(await response.text(),/\.env/)
 })

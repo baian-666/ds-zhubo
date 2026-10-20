@@ -12,8 +12,6 @@
     "check": "node scripts/check.mjs",
     "replay:director": "node scripts/replay-director.mjs",
     "setup:airi": "node scripts/airi.mjs setup",
-    "dev:airi": "node scripts/airi.mjs dev",
-    "setup:airi:web": "node scripts/airi.mjs setup-web",
     "setup:airi:checks": "node scripts/airi.mjs setup-checks",
     "check:airi": "node scripts/check-airi.mjs",
     "setup:desktop": "node scripts/desktop.mjs setup",

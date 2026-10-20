@@ -1,8 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { createRequire } from 'node:module'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { performanceContracts, performanceSource } from './performance-overlay.mjs'
 
@@ -27,7 +26,7 @@ if(existsSync(localModel)) {
 }
 const destination=join(vendor,'apps/stage-web/src/cohost')
 mkdirSync(destination,{recursive:true})
-for(const name of [...performanceContracts,'whale-capabilities.ts','cohost-contract.ts','cohost-parent.ts','use-cohost-performance.ts','motion-sequence.ts','whale-rig.ts','rig-controller.ts','pose-control.ts']) {
+for(const name of [...performanceContracts,'whale-capabilities.ts','cohost-contract.ts','use-cohost-performance.ts','motion-sequence.ts','whale-rig.ts','rig-controller.ts','pose-control.ts']) {
   // Node requires source extensions; Vite/tsc resolve the renderer's extensionless imports.
   const source=performanceSource(name)
   const path=join(destination,name)
@@ -48,14 +47,8 @@ if(!source.includes(added)) {
   source=source.replace(anchor,added+'\n'+anchor).replace('usePWAStore()','usePWAStore()\nuseCohostPerformance()')
   writeFileSync(app,source)
 }
-const require=createRequire(join(vendor,'apps/stage-web/package.json'))
-const viteRequire=createRequire(require.resolve('vite'))
-const esbuild=await import(pathToFileURL(viteRequire.resolve('esbuild')))
-const bundle=await esbuild.build({metafile:true,entryPoints:[join(destination,'cohost-parent.ts')],bundle:true,format:'esm',minify:true,
-  outfile:join(root,'apps/cohost/stage-bridge.mjs'),legalComments:'eof'})
-writeFileSync(join(root,'data/airi-overlay/bundle-inputs.json'),JSON.stringify(bundle.metafile.inputs,null,2))
 const voicePatch=spawnSync(process.execPath,[join(root,'scripts/patch-voice.mjs')],{cwd:root,stdio:'inherit'})
 if(voicePatch.status!==0)throw new Error('Shared voice overlay failed')
-console.log('Applied pinned AIRI cohost overlay and rebuilt the parent bridge.')
+console.log('Applied the pinned AIRI shared cohost overlay.')
 const consolePatch=spawnSync(process.execPath,[join(root,'scripts/patch-console.mjs')],{cwd:root,stdio:'inherit'})
 if(consolePatch.status!==0)throw new Error('Live room panel overlay failed')

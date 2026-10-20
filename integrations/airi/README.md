@@ -1,59 +1,33 @@
-# Local AIRI performance bridge
+# AIRI desktop integration
 
-This overlay targets the pinned AIRI commit in airi.lock.json. It supports stage-web and stage-tamagotchi.
+The project supports the Electron desktop app at the AIRI commit in `airi.lock.json`.
+The standalone web launcher and browser console have been removed.
 
-## Restore
+## Setup and replay
 
-Install the pinned AIRI web dependencies. Start the stage with npm run dev:airi.
-The startup script applies scripts/patch-airi.mjs before Vite starts.
-The installer checks the base commit and preserves unrelated source changes.
-It rejects edits to owned overlay files that differ from the previous installation.
+Get the pinned source with `scripts/local.ps1 setup:airi`.
+Install desktop dependencies with `scripts/local.ps1 setup:desktop`, then run `build:desktop`.
+Use `启动小鲸鱼.cmd` for daily use. Use `dev:desktop` for source debugging.
 
-The canonical source is in this directory. The installer copies it into the ignored vendor checkout.
-It adds one composable call to App.vue and builds apps/cohost/stage-bridge.mjs.
-The browser bundle includes existing Eventa and Valibot dependencies. Their notices are in third-party/stage-bridge.
-No credentials enter the renderer or the browser bundle.
+This directory holds the canonical overlays. `scripts/patch-desktop.mjs` applies the shared and desktop patches.
+Owned files must match the previous overlay before replacement. The scripts preserve unrelated upstream edits.
+Shared patches still prepare some upstream web files used by the original AIRI workspace. They do not launch a web app.
+The desktop build no longer generates the removed browser parent bridge.
 
-## Contract
+## Runtime
 
-Eventa transports commands between the control page and its AIRI iframe.
-Both ends check the origin and source window. The renderer validates commands with Valibot.
-Commands carry a room session, sequence, bounded action name and expiry time.
-The parent rejects older HTTP responses. The renderer rejects older commands within a session.
-A 1500 ms heartbeat lease releases control after a connection fails.
-AIRI uses its existing normalized pose store, spring and exclusive ownership.
-Saved model settings remain unchanged.
+The main process, renderer, and backend exchange bounded Eventa commands and shared status updates.
+One media owner controls capture and playback. Playback follows the actual audio clock and releases on interruption.
+The desktop keeps its existing `localhost:5174` origin and `data/desktop-profile` data.
+Settings, character cards, speech configuration, and session data use the backend repositories.
+Credentials stay in the local environment. They do not enter renderer bundles or Git archives.
 
-## Scope
+## Shared code and checks
 
-The default Live2D model supports the tested head, eye and mouth-form poses.
-Other models can expose different parameters. This bridge does not invent model-specific expression files or motion groups.
-The receipt reports model readiness and the requested pose. It is not a measurement of every rendered parameter.
-Only one active rehearsal page is intended. Multi-window ownership needs further testing.
-Windows speech runs in the cohost backend. This bridge has no audio-driven mouth opening.
+Vue components, speech pipelines, pose control, and browser-based regression fixtures remain shared AIRI code.
+A browser test does not imply a supported standalone web product.
+Check the pinned upstream guide before changing its source. Keep reproducible changes here and in `scripts/patch-*.mjs`.
 
-## Desktop
-
-Run npm run setup:desktop once, then npm run dev:desktop.
-scripts/patch-desktop.mjs applies the tracked desktop overlay without resetting the vendor checkout.
-The main process opens a sandboxed cohost console and polls the loopback cohost API.
-Eventa carries validated performance commands from main to the stage renderer.
-The desktop page supplies its own model-ready state. It does not use web startup resources.
-The same pose driver handles expiry and disconnect release on both surfaces.
-Credentials stay in the main process. The renderer receives only the bounded performance command.
-Desktop settings live in the ignored data/desktop-profile directory.
-The rehearsal uses AIRI voice capture and a fixed SiliconFlow proxy. Windows recognition stays available as a separate fallback.
-
-
-## Shared voice bridge
-
-use-cohost-voice.ts belongs to stage-ui and serves both stages. patch-voice.mjs installs it and hooks Stage playback.
-The pinned revision check runs in patch-airi.mjs. The overlay refuses to replace unrecorded local source edits.
-
-One stage lease owns capture and playback. The server consumes automatic decisions and streams text through polling snapshots.
-AIRI detects speech, encodes recordings, invokes its transcription adapter, and chunks speech through its existing pipeline.
-The local server fixes the speech provider and keeps all API credentials in the ignored .env.
-
-Each turn confirms completed playback segments. Failed turns cannot reopen from delayed snapshots.
-Stopping a lease cancels cloud requests, playback, and capture. Raw microphone audio is not saved automatically.
-The cloud receives speech segments for recognition. Use headphones for the first human trial.
+Run the relevant checks described in [AIRI checks](../../docs/AIRI-CHECKS.md).
+Current deployment and test boundaries are in [STATUS](../../docs/STATUS.md).
+Version recovery is in [VERSIONS](../../docs/VERSIONS.md).

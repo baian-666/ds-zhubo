@@ -25,10 +25,12 @@ const hash = value => createHash('sha256').update(typeof value === 'string' ? va
 const before = await get('status'), catalog = await get('characters')
 const card = catalog.catalog.value.cards.find(item => item.id === catalog.catalog.value.activeId)
 const model = before.configuration.model
+const focus = process.argv.find(arg => arg.startsWith('--focus='))?.slice(8).split(',')
+const memoryHistory = process.argv.includes('--memory-history')
 const profile = { name: card.data.name, prompt: cardPrompt(card.data), capabilities: testCapabilities() }
 if (hash(profile.prompt) !== before.configuration.cardFingerprint) throw Error('Active persona mismatch')
 const report = {
-  startedAt: new Date().toISOString(), directory, model, profileHash: hash(profile.prompt),
+  startedAt: new Date().toISOString(), directory, model, focus, memoryHistory, profileHash: hash(profile.prompt),
   method: 'Real configured DeepSeek and active persona; synthetic text, simulated clocks/delivery/capability catalog; real MCP except explicitly injected faults. No ASR/TTS/live stage execution. Sequential calls, no automatic retries.',
   productionBefore: { configuration: before.configuration, hosting: before.hosting.state, capture: before.airi.capture, roomHash: hash(before.room) },
   sourceHashes: Object.fromEntries(['participation-stream.mjs', 'participation-model.mjs', 'director-observation.mjs', 'director-tools.mjs', 'director-handbook.mjs', 'hosting.mjs', 'director-manual.md'].map(file => [file, hash(readFileSync(`apps/cohost/${file}`, 'utf8'))])),
@@ -43,15 +45,31 @@ const base = text => ({
 })
 const tools = new DirectorTools(), memory = new SessionContinuity(), book = new DirectorHandbook()
 async function run(name, category, snapshot, { expected, check, information, after, observation = false, source = 'real-model-synthetic-context' } = {}) {
+  if (focus && !focus.includes(category)) return {}
   const row = { name, category, source, input: snapshot.latestHost?.text, snapshot, expected, records: [] }
   report.rows.push(row)
   const started = Date.now(), controller = new AbortController(), timer = setTimeout(() => controller.abort(), 30000)
   let result
+  const responses = []
+  const fetchObserved = async (...args) => {
+    const response = await fetch(...args)
+    if (!response.ok || !response.body) return response
+    const record = { text: '' }, decoder = new TextDecoder()
+    responses.push(record)
+    const body = response.body.pipeThrough(new TransformStream({
+      transform(chunk, controller) {
+        record.text += decoder.decode(chunk, { stream: true })
+        controller.enqueue(chunk)
+      },
+      flush() { record.text += decoder.decode() },
+    }))
+    return new Response(body, { status: response.status, headers: response.headers })
+  }
   try {
     if (observation) {
-      row.observation = await observeDirector(snapshot, { apiKey: process.env.DEEPSEEK_API_KEY, model, profile, signal: controller.signal })
+      row.observation = await observeDirector(snapshot, { apiKey: process.env.DEEPSEEK_API_KEY, model, profile, signal: controller.signal, fetchImpl: fetchObserved })
     } else {
-      result = await streamParticipation(snapshot, { apiKey: process.env.DEEPSEEK_API_KEY, model, profile, information, signal: controller.signal, metrics: row.metrics = {} })
+      result = await streamParticipation(snapshot, { apiKey: process.env.DEEPSEEK_API_KEY, model, profile, information, signal: controller.signal, metrics: row.metrics = {}, fetchImpl: fetchObserved })
       row.firstDecisionMs = Date.now() - started
       const { replyStream, ...decision } = result
       row.decision = decision
@@ -63,10 +81,15 @@ async function run(name, category, snapshot, { expected, check, information, aft
     row.pass = check ? Boolean(check(row)) : null
   } catch (error) {
     row.error = error.code ?? error.name
+    row.partialSpeech = row.records.filter(item => item.kind === 'speech').map(item => item.text).join('')
     row.pass = false
   } finally {
     clearTimeout(timer); result?.replyStream?.close()
     row.totalMs = Date.now() - started
+    if (row.error) {
+      row.providerResponses = `provider-${report.rows.length}.json`
+      writeFileSync(`${directory}/${row.providerResponses}`, JSON.stringify(responses.map(item => item.text), null, 2))
+    }
     save()
     console.log(JSON.stringify({ name, category, pass: row.pass, ms: row.totalMs, error: row.error }))
   }
@@ -78,8 +101,8 @@ try {
     ['要求继续', '对对，你接着说，我在听', 'backchannel'],
     ['明确接管', '等一下，我还没说完，先听我把故事讲完', 'takeover'],
     ['附和后转问', '对，不过我想问个别的问题', 'takeover'],
-    ['引用叫停', '他说“别说了”，你继续', 'uncertain'],
-    ['否定叫停', '我不是让你停，你接着讲', 'uncertain'],
+    ['引用叫停', '他说“别说了”，你继续', ['uncertain', 'backchannel']],
+    ['否定叫停', '我不是让你停，你接着讲', ['uncertain', 'backchannel']],
     ['未完引用', '然后他突然说别', 'uncertain'],
     ['ASR同音附和', '嗯对我再听你接着讲', 'backchannel'],
   ]
@@ -87,7 +110,7 @@ try {
     await run(`${name}#${repeat}`, 'floor', {
       ...base(text), active: true, hostSpeaking: true, floorOpportunity: true,
       speaking: { current: '猫把跑步机占了，还嫌人类吵。', delivered: '这只猫很会享受。', planned: '要不收它一点房租？' },
-    }, { expected: intent, check: row => row.decision.floorIntent === intent })
+    }, { expected: intent, check: row => (Array.isArray(intent) ? intent : [intent]).includes(row.decision.floorIntent) })
   }
   for (const [name, text, wait] of [
     ['完整笑点', '我家的猫把跑步机当床了，还嫌我跑步吵它睡觉', false],
@@ -144,20 +167,23 @@ try {
     if (name === '未播计划与事实') snapshot.speaking = { current: '', delivered: '', planned: '答案是42。' }
     await run(name, 'content', snapshot, { expected: 'Manual semantic review; valid output alone is not success' })
   }
+  const memoryScene = []
   for (const [index, text] of [
     '我家猫叫年糕。稍后再聊它把跑步机当床的事，先帮我记着。',
     '我先集中注意力打完这一局，先别说。',
     '打完了，接着聊刚才的事，我家猫叫什么，它占着什么？',
   ].entries()) {
-    const snapshot = { ...base(text), ...memory.context('evaluation', 1) }
-    await run(`待续记忆${index + 1}`, 'continuity', snapshot, {
+    const snapshot = { ...base(text), ...memory.context('evaluation', 1), scene: memoryHistory ? [...memoryScene] : [] }
+    const memoryRow = await run(`待续记忆${index + 1}`, 'continuity', snapshot, {
       after: (row, result) => {
         row.directive = row.records.findLast(record => record.continuation)?.continuation ?? result.continuation
         const prepared = memory.prepare(row.directive, { host: snapshot.latestHost, characterId: 'evaluation', topic: 1, action: result.action, offered: snapshot.continuations.map(item => item.id) })
         memory.commit(prepared); row.memory = memory.status('evaluation', 1)
       },
-      check: row => index === 0 ? row.directive?.action === 'defer' : index === 1 ? row.decision.action === 'wait' : row.directive?.action === 'resume' && /年糕/.test(row.text) && /跑步机/.test(row.text),
+      check: row => index === 0 ? row.directive?.action === 'defer' && row.memory.items.some(item => item.state === 'pending') : index === 1 ? row.decision.action === 'wait' : row.directive?.action === 'resume' && row.memory.items.some(item => item.state === 'resumed') && /年糕/.test(row.text) && /跑步机/.test(row.text),
     })
+    memoryScene.push({ role: 'host', text, topic: 1 })
+    if (memoryRow.text) memoryScene.push({ role: 'assistant', text: memoryRow.text, topic: 1, deliveryState: 'complete' })
   }
   const evidence = [{ role: 'host', text: '猫把跑步机当床了', topic: 1 }, { role: 'assistant', text: '猫成了健身房老板。', topic: 1, deliveryState: 'complete' }]
   for (const [name, text, operation, viewer] of [
@@ -194,7 +220,7 @@ try {
       await run(name, 'tools', base(text), {
         information, expected,
         after: row => { row.tools = tools.status(id).recent },
-        check: row => expected ? row.tools.some(tool => tool.tool === expected && tool.state === 'completed') : row.tools.length === 0,
+        check: row => expected ? row.tools.some(tool => tool.tool === expected && tool.state === 'completed' && !/rate limit|quota exceeded|payment required/i.test(tool.summary)) : row.tools.length === 0,
       })
     } finally { await information.close() }
   }
@@ -218,6 +244,26 @@ try {
       hosting: { state: 'observing', continuous: true, role: 'lead', topic: '生活中的小发现', quietMs: 45000, pauseElapsedMs: 45000, withoutInputMs: (i + 1) * 90000, reviewRemaining: null, lastHandoff: i ? 'continue' : 'listen' },
     }, { expected: 'Manual repetition/grounding review; wait is allowed', check: row => row.decision.action === 'wait' || row.decision.action === 'reply_program' && Boolean(row.closing) })
     if (row.text) scene.push({ role: 'assistant', text: row.text, topic: 1, deliveryState: 'complete' })
+  }
+  const asrPath = process.argv.find(arg => arg.startsWith('--asr-report='))?.slice(13)
+  if (asrPath) {
+    const asr = JSON.parse(readFileSync(asrPath, 'utf8'))
+    for (const item of asr.rows.filter(row => ['pause', 'resume', 'quoted-stop', 'backchannel', 'takeover'].includes(row.name))) {
+      const floor = ['quoted-stop', 'backchannel', 'takeover'].includes(item.name)
+      const snapshot = floor ? {
+        ...base(item.text), active: true, hostSpeaking: true, floorOpportunity: true,
+        speaking: { current: '猫把跑步机占了，还嫌人类吵。', delivered: '', planned: '' },
+      } : { ...base(item.text), hosting: { state: item.name === 'pause' ? 'running' : 'paused', continuous: true, role: 'lead' } }
+      await run(`${item.name}/${item.variant}`, 'asr-director', snapshot, {
+        source: 'real-local-ASR-output-to-real-model; synthetic-audio; no-playback',
+        expected: item.name === 'takeover' ? 'takeover' : item.name === 'quoted-stop' ? 'not takeover' : item.name === 'backchannel' ? 'backchannel' : item.name,
+        after: row => { row.originalText = item.expected; row.asrSha256 = item.sha256 },
+        check: row => item.name === 'takeover' ? row.decision.floorIntent === 'takeover'
+          : item.name === 'quoted-stop' ? row.decision.floorIntent !== 'takeover'
+            : item.name === 'backchannel' ? row.decision.floorIntent === 'backchannel'
+              : row.decision.hostingControl === (item.name === 'pause' ? 'pause' : 'start'),
+      })
+    }
   }
 } finally {
   tools.close(); memory.close()

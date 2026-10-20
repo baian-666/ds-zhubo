@@ -6,6 +6,7 @@
 | 要解决的问题 | 先读 |
 | --- | --- |
 | 当前部署、已知问题、下一步 | [STATUS](STATUS.md) |
+| 小鲸鱼、导演与模型综合能力和失败样本 | [综合评估](CAPABILITY-EVAL-2026-10-20.md) |
 | 保存版本、找旧版、恢复范围 | [版本与存档](VERSIONS.md) |
 | 启动、更新、桌面回退 | [固定桌面](DESKTOP-BUILD.md)；环境问题查 [本地开发](LOCAL-DEVELOPMENT.md) |
 | 角色卡、声音和配置保存 | [配置仓库](RUNTIME-SETTINGS.md) |

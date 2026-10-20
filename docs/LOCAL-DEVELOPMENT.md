@@ -1,12 +1,12 @@
 # 转为本地主力开发
 
-更新：2026-10-12。用户选择在当前 Windows 主力电脑本地开发。云端任务与 GitHub 保留项目记录，模型仍通过 DeepSeek API 使用；本地开发并不要求本机运行大模型。
+当前入口更新：2026-10-20。Windows 本机桌面是唯一产品入口，独立网页版已移除。GitHub 保存源码；当前试用本地流式识别，DeepSeek/Qwen 仍使用云端服务。下方迁移背景不代表当前部署。
 
 ## 当前 Windows 接续入口
 
-本轮已在 D:\ds-zhubo 安装固定版本工具链并启动 cohost。使用 scripts/setup-local.ps1 与 scripts/local.ps1，不需替换系统 Node。当前已实现 Windows 的 setup:airi:web 与 dev:airi；下方旧迁移记录中的“封装脚本拒绝 Windows”已被此实现替代。
+本机固定工具链由 scripts/setup-local.ps1 与 scripts/local.ps1 管理，不需替换系统 Node。AIRI 获取入口为 setup:airi，桌面依赖安装为 setup:desktop，日常启动使用固定构建。
 
-日常双击 `启动小鲸鱼.cmd` 打开桌面原生直播侧栏，`启动网页版.cmd` 为备用入口；操作与设置边界见 [AIRI 本机直播入口](AIRI-CONSOLE.md)。两端共享同一场次，语音说明见 [桌面与语音试播](DESKTOP-VOICE.md)，旧文字调试入口见 [文字虚拟直播间](TEXT-ROOM.md)。实际验收以 STATUS 最新记录为准。下方旧迁移步骤保留历史背景。
+日常双击 `启动小鲸鱼.cmd` 打开桌面原生直播侧栏；操作与设置边界见 [AIRI 本机直播入口](AIRI-CONSOLE.md)，语音说明见 [桌面与语音试播](DESKTOP-VOICE.md)。8787 仅提供后端 API，旧文字控制页已移除。实际验收以 STATUS 最新记录为准。
 
 本场记录默认写入忽略的 `data/cohost-session.sqlite`，后端重启自动恢复有限上下文。管理入口在 AIRI“设置 → 直播助播 → 本场记录与记忆”。旧 `--room-snapshot` 仅用于空数据库首次迁移；日常启动不再携带此参数。备份、恢复边界和临时回退见 [场次持续性](SESSION-MEMORY.md)。
 
@@ -25,7 +25,7 @@ B站弹幕采用 blivechat 本地版：双击 `配置B站弹幕.cmd`，在本机
 
 ## 一次性接续
 
-1. 将最新受跟踪代码同步到已授权仓库，或从完整 Git bundle 恢复；不能只克隆旧 main 后假定已有导演功能。正常推送需先有用户明确授权；之前自动审批拒绝业务代码推送 main，旧授权仅覆盖 STATUS 文档更新。
+1. 同步现有 GitHub 仓库，或从已校验存档恢复。2026-10-20 用户已明确授权将当前源码及未上传提交历史公开推送，移除网页版前标签为 snapshot-20261020-before-desktop-only。密钥、数据库和模型仍不随 Git 上传。
 2. 在 Codex 新建本地任务，选择本机已有项目目录；没有目录时选择一个用户指定的开发父目录，再由本地任务克隆同一个仓库。保留已有修改，不创建新的 GitHub 仓库、不 reset、不强推。
 3. 本地任务先读 AGENTS 和交接文档，检查实际操作系统、目录、分支、提交、Git/Node/pnpm 和网络。可复用工具链时优先复用；版本按锁文件。
 4. 初期使用本地服务与本地浏览器，不依赖云端端口预览。未来生产服务部署另行实施。
@@ -47,7 +47,7 @@ npm test
 npm run dev
 ```
 
-文字联调入口为本机 `http://127.0.0.1:8787`。浏览器测试须在服务确实启动后进行。根项目现在复用 AIRI 的 Eventa 与 Valibot，版本固定在 package-lock.json；首次安装运行上面的 npm ci，或 scripts/setup-local.ps1。不需要安装整套 AIRI 才能运行后端测试。全仓依赖与验证入口见 [AIRI 检查说明](AIRI-CHECKS.md)。
+本机后端为 `http://127.0.0.1:8787`，存活检查用 `/healthz`，业务接口用 `/api/`；根路径不再提供控制页面。根项目使用固定依赖，首次安装运行 npm ci 或 scripts/setup-local.ps1。不需要安装整套 AIRI 就能运行后端测试。全仓依赖与验证入口见 [AIRI 检查说明](AIRI-CHECKS.md)。
 
 用本机编辑器配置 `.env`，保留 `HOST=127.0.0.1`、`PORT=8787`，填入 `DEEPSEEK_API_KEY`；模型先沿用已实测的 `deepseek-flash`，仍需在新设备实际检查可用性。`.env.example` 可作为模板。不能覆盖已有 `.env`，不复制云端密钥占位符。AIRI 与 cohost 已有可重放的表演桥接，服务端密钥不得写进客户端源码。
 
@@ -80,30 +80,26 @@ New-Item -ItemType Junction -Path 'D:\ds-zhubo\data\indextts\repo\checkpoints' -
 
 固定提交和依赖版本继续使用 `airi.lock.json`。先读上游 AGENTS，再安装；已有 `vendor/airi` 时检查 origin、HEAD 和修改，不覆盖已有工作。
 
-此前 `scripts/airi.mjs` 拒绝 Windows。本轮已实现并实际执行 `setup:airi:web` 的 Windows Web 安装与构建，桌面现另有 setup:desktop / dev:desktop 入口，见 DESKTOP-VOICE.md；不等于所有原生依赖或安装包已验收。本阶段可按下面的上游 Web 命令执行；源码获取必须沿用固定仓库/提交和工作区保护检查。后续若改跨平台脚本，需要实际 Windows 验证。
+在新目录获取固定 AIRI 源码后安装桌面依赖并构建。已有工作区不重复运行源码获取；保护检查会拒绝覆盖 vendor 中已有修改。
 
 ```powershell
-# 先获取并核验 airi.lock.json 指定的仓库和提交到 vendor/airi
-Set-Location vendor/airi
-pnpm --filter @proj-airi/stage-web... install --frozen-lockfile --ignore-scripts
-pnpm -r --filter '@proj-airi/stage-web^...' --workspace-concurrency=2 --if-present run build
-pnpm -F @proj-airi/stage-web exec vite --host 127.0.0.1 --port 5173 --strictPort
+./scripts/local.ps1 setup:airi
+./scripts/local.ps1 setup:desktop
+./scripts/local.ps1 build:desktop
 ```
 
-安装跳过生命周期脚本是已用的 Web 安装范围，不代表桌面版和所有原生依赖已验证。如果本机需要代理，使用本机实际受支持的代理配置；不能照抄云端 `proxy:8080`。默认模型与 SDK 来自 `dist.ayaka.moe` 和 `cubism.live2d.com`，按本机真实网络结果诊断。下载成功后在本机 `http://127.0.0.1:5173` 验证实际形象渲染。
+setup:airi 只获取源码，setup:desktop 安装依赖并构建共享包。模型与 SDK 的下载按本机真实网络诊断；不要照抄历史云端代理地址。完成后使用固定桌面核验形象。本次没有在全新机器重复安装验收。
 
 ## 本地任务的首条消息
 
 ```text
-继续 ds-zhubo，已改成本地主力开发。先读取 AGENTS.md、docs/HANDOFF.md、docs/STATUS.md、docs/CLOUD.md、docs/LOCAL-DEVELOPMENT.md、docs/AIRI-SETUP.md 和 docs/TURN-DIRECTOR.md。
-
-检查当前目录、分支、提交及已有修改，确认包含此前导演与播放回执代码。保护已有修改，不新建 GitHub 仓库、不强推。检查本机 Git、Node 26.7.0/npm 11.19.0、pnpm 11.24.0；缺失时完成本地工具链安装。运行 npm run check 和 npm test，启动文字联调台并用本机浏览器验证，随后安装启动固定版本 AIRI 的默认舞台。密钥通过本机忽略的 .env 配置，不发到聊天、不打印。
-
-接着实施文字虚拟直播间：可选/自定义模拟弹幕、文字模拟主播讲话、AIRI 形象与字幕、人工/自动导演和决策时间线。真人主播主导，优先验证何时该说话；不要在主 AI 快速回答前串行增加另一轮模型调用。已有异步导演与播放回执原型；复杂语义适配、完整虚拟直播间、真实语音和长期记忆尚未完成。用户已允许按需少量真实 API 测试，不购买资源、不正式直播。直接继续开发，完成检查并更新 STATUS。
+继续 ds-zhubo。先读 AGENTS.md 和 docs/STATUS.md，按 docs/README.md 选取当前任务的专题，不默认加载历史。
+保护本机现有修改、数据库和模型。只提供桌面产品入口，8787 为后端 API，5174 为桌面页面。按任务修改、检查、保存版本并更新精简 STATUS。
+密钥仅留忽略的 .env；源码改动保存在 integrations/airi 与重放脚本。不要只修改 vendor，不清空桌面用户数据，不强推。
 ```
 
 ## 表演版本的 AIRI 本机补丁
 
-运行 dev:airi 时会自动执行 scripts/patch-airi.mjs，将 integrations/airi 的受跟踪源码应用到固定版本，再生成控制台的 Eventa 浏览器桥接。补丁不需要把 DeepSeek 密钥填进 AIRI。
+构建/调试桌面时，patch-desktop.mjs 调用 patch-airi.mjs 准备共享补丁，并将 integrations/airi 源码应用到固定版本。不再生成已删除的浏览器父页面桥接。补丁不需要把 DeepSeek 密钥填进 AIRI。
 
-已经应用补丁的 vendor/airi 会显示本机修改；setup:airi:web 的保护检查会拒绝重置它。正常体验直接运行 dev:airi。修改后的表演源码应保存在 integrations/airi，不能只留在 vendor。详细范围和验收见 docs/LIVE2D-PERFORMANCE.md。
+已经应用补丁的 vendor/airi 会显示本机修改，setup:airi 会拒绝重置它。日常使用固定桌面，源码调试用 dev:desktop。表演源码保存在 integrations/airi，不能只留在 vendor；历史验证见 docs/LIVE2D-PERFORMANCE.md。

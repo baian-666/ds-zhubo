@@ -23,7 +23,7 @@ function run(command, args, cwd = target, capture = false) {
   return result.stdout?.trim()
 }
 
-if (!['setup', 'setup-web', 'setup-checks', 'dev'].includes(action)) throw new Error('Use setup, setup-web, setup-checks or dev.')
+if (!['setup', 'setup-checks'].includes(action)) throw new Error('Use setup or setup-checks. Start the desktop with scripts/local.ps1 start:desktop.')
 if (process.versions.node !== lock.node) throw new Error(`Use Node ${lock.node} from the local toolchain.`)
 if (run('pnpm', ['--version'], root, true) !== lock.pnpm) throw new Error(`Use pnpm ${lock.pnpm}.`)
 
@@ -31,7 +31,7 @@ if (action === 'setup-checks') {
   if (run('git', ['rev-parse', 'HEAD'], target, true) !== lock.commit) throw new Error('AIRI revision differs from airi.lock.json.')
   run('pnpm', ['install', '--frozen-lockfile', '--ignore-scripts'])
   run(process.execPath, [join(root,'scripts/patch-checks.mjs')], root)
-} else if (action === 'setup' || action === 'setup-web') {
+} else {
   mkdirSync(target, { recursive: true })
   if (!existsSync(join(target, '.git'))) {
     run('git', ['init'])
@@ -43,16 +43,6 @@ if (action === 'setup-checks') {
     throw new Error('AIRI has local changes. Save them as reviewed patches before setup. Nothing was reset.')
   run('git', ['fetch', '--depth=1', 'origin', lock.commit])
   run('git', ['checkout', '--detach', lock.commit])
-  if (action === 'setup-web' || process.platform === 'win32') {
-    run('pnpm', ['--filter', '@proj-airi/stage-web...', 'install', '--frozen-lockfile', '--ignore-scripts'])
-    run('pnpm', ['-r', '--filter', '@proj-airi/stage-web^...', '--workspace-concurrency=2', '--if-present', 'run', 'build'])
-  } else run('pnpm', ['install', '--frozen-lockfile'])
-} else {
-  if (!existsSync(join(target, '.git'))) throw new Error('Run npm run setup:airi first.')
-  if (run('git', ['rev-parse', 'HEAD'], target, true) !== lock.commit) throw new Error('AIRI revision differs from airi.lock.json.')
-  // Vite accepts only the current private Codespaces host, rather than every host.
-  if (process.env.CODESPACE_NAME && process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN)
-    env.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS = `${process.env.CODESPACE_NAME}-5173.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`
-  run(process.execPath, [join(root,'scripts/patch-airi.mjs')], root)
-  run('pnpm', ['-F', '@proj-airi/stage-web', 'exec', 'vite', '--host', '127.0.0.1', '--port', '5173', '--strictPort'])
+  // Dependency installation and shared builds belong to setup:desktop.
+  console.log('Pinned AIRI source ready. Run scripts/local.ps1 setup:desktop, then build:desktop.')
 }

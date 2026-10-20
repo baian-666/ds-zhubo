@@ -579,22 +579,6 @@ export function createApp({ apiKey = process.env.DEEPSEEK_API_KEY, model = proce
         }
         throw new HttpError(404,'未找到')
       }
-      if (request.method === 'GET' && path === '/') {
-        response.writeHead(200, {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'no-store',
-          'X-Content-Type-Options': 'nosniff',
-          'Referrer-Policy': 'no-referrer',
-          'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; frame-src http://127.0.0.1:5173; frame-ancestors 'none'; base-uri 'none'",
-        })
-        response.end(readFileSync(new URL('./index.html', import.meta.url)))
-        return
-      }
-      if (request.method === 'GET' && ['/client.mjs','/stage-bridge.mjs'].includes(path)) {
-        response.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' })
-        response.end(readFileSync(new URL('.' + path, import.meta.url)))
-        return
-      }
       if (path === '/healthz' && request.method === 'GET') { json(response, 200, { ok: true }); return }
       if (!path?.startsWith('/api/')) throw new HttpError(404, '未找到')
       if (!authorized(request, token)) throw new HttpError(401, '请填写正确的助播访问令牌')

@@ -19,6 +19,7 @@ Use `docs/README.md` to choose a topic only when STATUS is insufficient. Read `d
 - Checkpoint archives are local and ignored by Git. Do not delete archived desktop artifacts during disk cleanup. Keep credentials, desktop profile/imported models, external voice models, and off-device backups as explicit separate recovery requirements.
 
 - This project builds a Chinese live-stream cohost with AIRI and DeepSeek.
+- The product has one AIRI desktop entry. Keep shared renderer and browser test code, but do not recreate standalone web launchers or browser control pages unless the user requests them.
 - The next milestone is a minimal voice trial for natural turn-taking, not full platform integration.
 - Distinguish implemented behavior, simulated test results, and unverified plans.
 - Keep model credentials in environment secrets. Never commit secrets or print them in logs.

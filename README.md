@@ -1,95 +1,55 @@
 # DS 助播 · AIRI + DeepSeek
 
-面向聊天陪伴、知识分享的 Live2D AI 主播“小鲸鱼”。由她自主主持，真人作为搭档加入；保留原助播方式，自然接话并选择性回复弹幕。目标平台为 B 站和微信视频号，不包含游戏操作。
+中文 Live2D 主播“小鲸鱼”：由她自主主持，真人作为搭档加入，保留助播方式。当前是 Windows 本机试播原型，主要目标是自然话轮和低延迟，尚未完成真人长期试播与真实 B 站送达验收。
 
-**当前是 Windows 本机试播原型，尚不是可直接开播的产品。** 已有 AIRI 桌面/网页直播侧栏、同角色聊天气泡与导演时间线、DeepSeek 自主参与、小鲸鱼人格、鲸鱼娘 Live2D 连续表演，以及 AIRI 语音识别、合成和口型。真人识别质量、自然话轮和长期稳定性尚未验收；真实平台弹幕和生产部署未完成。
+日常双击 `启动小鲸鱼.cmd`。项目只提供桌面入口，独立网页版和旧浏览器控制台已移除。
+当前部署与已知问题先读 [STATUS](docs/STATUS.md)，按任务查 [文档入口](docs/README.md)。
 
-接续工作先读 [当前状态](docs/STATUS.md)，需要细节再查 [文档入口](docs/README.md)；保存/找回旧版见 [版本存档](docs/VERSIONS.md)。
+## 保存与找回版本
 
-当前推荐：本机安装后双击 `启动小鲸鱼.cmd` 使用桌面版，`启动网页版.cmd` 为备用。详见 [AIRI 直播入口与设置](docs/AIRI-CONSOLE.md)、[桌面与语音试播](docs/DESKTOP-VOICE.md)、[本地开发](docs/LOCAL-DEVELOPMENT.md)。下方云端配置保留为备选路径。
+当前源码保存在 [GitHub 仓库](https://github.com/baian-666/ds-zhubo)。
+移除网页版之前的源码标签为 `snapshot-20261020-before-desktop-only`。
+完整的本机版本另用 `保存项目版本.cmd` 保存，包含源码、数据库与桌面构建，具体编号和恢复步骤见 [版本存档](docs/VERSIONS.md)。
 
-## 在另一台设备继续
+GitHub 不包含 `.env`、聊天数据库、桌面导入模型、外置语音模型、安装依赖和本机存档。换电脑需要单独准备这些材料，不能只克隆代码就当作整机恢复。
 
-当前主力为本机 Windows，换设备先核对 [版本存档的恢复范围](docs/VERSIONS.md)，并同步已保存代码。云端开发作为备选，仅在云端工作时阅读 [云端开发接续](docs/CLOUD.md)；[原始交接](docs/HANDOFF.md) 保留早期需求。
+## 本机安装与启动
 
-本仓库含开发草稿和项目上下文。云端对话、GitHub 代码备份、Codex Cloud 执行环境是三件独立的事。只有选中并发布关联本仓库的 Codex Cloud 环境后，才能在该环境中继续执行开发任务。
+已安装的本机继续使用启动脚本，不重复安装。新目录按 [本地开发](docs/LOCAL-DEVELOPMENT.md) 准备固定 Node 26.7.0、npm 11.19.0、pnpm 11.24.0，然后执行：
 
-`.devcontainer` 用于下面的 GitHub Codespaces 备选开发方式，不会自动创建 Codex Cloud 环境。
-
-### GitHub Codespaces 备选
-
-[用 GitHub Codespaces 打开](https://codespaces.new/baian-666/ds-zhubo)
-
-创建环境前查看 GitHub 显示的账户额度和机器配置。已经有 Codespace 时，从 [Codespaces 列表](https://github.com/codespaces) 恢复同一个环境。
-
-开发容器自动安装与锁定 AIRI 源码对应的 Node 26.7.0、pnpm 11.24.0，并执行原型检查。**此配置尚未在真实 Codespace 中完成启动验收。**
-
-进入终端后运行：
-
-```sh
-npm run dev
+```powershell
+./scripts/setup-local.ps1
+./scripts/local.ps1 setup:airi
+./scripts/local.ps1 setup:desktop
+./scripts/local.ps1 build:desktop
 ```
 
-打开 Ports 中的 **8787** 预览页面，保持端口为 **Private**。即使没有 API Key，也可以检查页面、队列和控制状态。
+`setup:airi` 只获取固定上游源码，拒绝覆盖已有修改；依赖安装与共享包构建由 `setup:desktop` 负责。
+在忽略的 `.env` 配置本机凭据，随后双击 `启动小鲸鱼.cmd`。
+模型导入、语音配置和试聊见 [桌面与语音](docs/DESKTOP-VOICE.md)，更新/回退见 [固定桌面](docs/DESKTOP-BUILD.md)。
+本轮没有在全新机器重做安装验收，也没有制作独立安装包。
 
-要调用 DeepSeek：在 [Codespaces secrets](https://github.com/settings/codespaces) 添加 `DEEPSEEK_API_KEY`，授予本仓库访问权限，然后重启 Codespace 和服务。密钥不填入网页，也不提交到仓库。
+## 开发与检查
 
-默认模型为 `deepseek-flash`，关闭思考模式，按短句流式输出。可以通过 `DEEPSEEK_MODEL` 改为账号可用的模型。[DeepSeek 官方 API 文档](https://api-docs.deepseek.com/)
-
-既有真实 DeepSeek 文字试验结果见 STATUS；自动测试使用模拟模型，不消耗模型额度。语音设备链路通过不等同真人话轮通过。
-
-## 启动 AIRI 舞台
-
-另开终端：
-
-```sh
-npm run setup:airi
-npm run dev:airi
+```powershell
+./scripts/local.ps1 check
+./scripts/local.ps1 test
+./scripts/local.ps1 dev
+# 另开终端，启动桌面源码调试：
+./scripts/local.ps1 dev:desktop
 ```
 
-打开 Ports 中的 **5173** HTTPS 预览地址。初次安装会拉取 AIRI 依赖并构建共享包，时间和磁盘占用明显多于文字联调台。按运行结果调整开发环境大小。
+8787 仅提供后端 API 和 `/healthz`，桌面页面继续使用 localhost:5174，以保留原来的本机数据来源。
+网页启动、5173 舞台服务和浏览器控制台不再作为产品入口。
+`integrations/airi` 与可重放补丁保存自有改动，`vendor/airi` 是忽略的上游工作区，不能在那里保存唯一源码。
 
-`airi.lock.json` 固定上游提交，不随 main 自动漂移。源码下载到忽略目录 `vendor/airi`。完整安装及浏览器渲染仍待云端验证。
+## 边界与来源
 
-**当前 8787 控制台与 AIRI 网页/桌面通过表演桥接连接。** AIRI 的麦克风和 Live2D 渲染发生在打开页面的直播设备。云端托管网页不会把渲染迁移到服务器。
+DeepSeek 负责意识与导演，当前试用本地流式识别，Qwen 云端克隆负责发声。准确度、延迟、附和误停与长期记忆限制以 STATUS 的最新证据为准。
+B 站接入见 [BILIBILI](docs/BILIBILI.md)；没有游戏操作和完整平台集成。
+云端环境仅用于开发/检查，历史说明见 [CLOUD](docs/CLOUD.md)，不提供网页版预览。
 
-不要直接在 `vendor/airi` 保存唯一的修改。后续 AIRI 适配需作为可重放补丁提交到本仓库，或迁入可推送的上游派生仓库，再更新初始化脚本。当前可重放补丁保存在 integrations/airi 与 scripts/patch-airi.mjs、scripts/patch-desktop.mjs。
+- [固定 AIRI 上游与许可证](https://github.com/moeru-ai/airi/tree/34576c19f618a04e616657089f0688a8637873f2)
+- [B 站官方接入示例](https://github.com/bilibili-openplatform/OpenLive_CSharpDemo)
 
-## 目前可以测试
-
-- 主播输入文字，DeepSeek 流式回复，并保存最近 6 轮完整对话作为短期上下文。
-- 主播语音活动与识别文本进入导演；点击“让小鲸鱼停一下”取消请求与朗读，丢弃迟到结果。
-- 静音后停止生成，并阻止新回答。
-- 自动导演可按相关性选择合格模拟弹幕；人工模式保留主播点选。
-- 全局弹幕回复冷却 20 秒，同观众冷却 60 秒，候选 20 秒过期。
-- 消息按平台和 ID 去重，队列最多 128 条。
-
-这是单直播场次的进程内原型。重启会丢失上下文和队列；跨设备长期记忆与配置同步尚未实现。当前包含语义自主参与和规则边界，仍有已登记的话轮与跨话题记忆问题；没有自动读取两个平台。
-
-## 开发和检查
-
-```sh
-npm run check
-npm test
-```
-
-原型只用 Node 内置模块，没有根项目第三方依赖。AIRI 依赖由它自己的 pnpm lockfile 管理。实际检查结果和下一步见 [项目状态](docs/STATUS.md)，架构见 [项目方案](docs/PROJECT.md)，最新的自然互动验证方案见 [交接说明](docs/HANDOFF.md)。
-
-换设备前提交、推送代码，并更新 `docs/STATUS.md`。开发环境的未提交修改、浏览器设置和聊天记录不能替代仓库同步。
-
-## 运行边界
-
-- Codespaces 用于开发。正式直播的 AI 服务需要单独部署到云服务器。
-- 原型默认只监听本机，使用 Codespaces 私有转发。不要把无认证端口改成 Public。
-- 非本机监听要求 `COHOST_ACCESS_TOKEN` 至少 24 个字符。生产还需要 HTTPS、身份认证、持久化、调用额度限制和日志治理。
-- 当前没有购买、启动云服务器或创建付费云开发实例，也没有开始推流。
-- B 站接入走官方直播开放平台验证授权。视频号评论来源仍待核实。
-- 当前使用 Windows 中文识别和系统朗读做最小试播，识别错字明显，后续按真人结果升级。用户角色模型尚未收到，音频口型未接入。
-
-## 来源
-
-- [AIRI 上游与许可证](https://github.com/moeru-ai/airi/tree/34576c19f618a04e616657089f0688a8637873f2)
-- [B 站官方直播接入示例](https://github.com/bilibili-openplatform/OpenLive_CSharpDemo)
-- [Codespaces 文档](https://docs.github.com/en/codespaces)
-
-AIRI 源码与其素材保留原有许可证，示例素材不自动代表适用于本项目的直播授权。
+模型与素材保留各自许可证；源码备份不代表素材的直播授权。

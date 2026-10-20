@@ -1,5 +1,7 @@
 # 在 Codex Cloud 接续开发
 
+> 2026-10-20：项目已移除独立网页版。以下网页预览和 5173 命令属于历史方案；云端只用于源码开发与检查，当前启动方式见 [STATUS](STATUS.md)。
+
 目标仓库：https://github.com/baian-666/ds-zhubo ，分支 `main`。
 
 ## 当前准备范围

@@ -12,9 +12,9 @@ async function start(t, options = {}) {
   return { get: path => fetch(url + path), post: (path, data, headers = {}) => fetch(url + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(data) }) }
 }
 
-test('page and health work without a model key; model request fails explicitly', async t => {
+test('health and status work without a model key while browser pages stay unavailable', async t => {
   const app = await start(t, { apiKey: '', token: '' })
-  assert.equal((await app.get('/')).status, 200)
+  assert.equal((await app.get('/')).status, 404)
   assert.equal((await app.get('/healthz')).status, 200)
   const status = await (await app.get('/api/status')).json()
   assert.equal(status.deepseekConfigured, false)
