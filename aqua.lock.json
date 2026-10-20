@@ -1,0 +1,100 @@
+{
+  "aqua": {
+    "repository": "https://github.com/Lucas1479/Aqua-TTS.git",
+    "commit": "591fbb5f82052b6965612a3f50dbc201fbc7e261"
+  },
+  "upstream": {
+    "repository": "https://github.com/RVC-Boss/GPT-SoVITS.git",
+    "commit": "08d627c3338173c3229286d8787060d6559fe0f8"
+  },
+  "models": [
+    {
+      "repo": "lj1995/GPT-SoVITS",
+      "revision": "8f8857563c040d542de108a2c18b0425abd6c9c5",
+      "file": "s1v3.ckpt",
+      "sha256": "87133414860ea14ff6620c483a3db5ed07b44be42e2c3fcdad65523a729a745a",
+      "bytes": 155284856
+    },
+    {
+      "repo": "lj1995/GPT-SoVITS",
+      "revision": "8f8857563c040d542de108a2c18b0425abd6c9c5",
+      "file": "s2Gv3.pth",
+      "sha256": "f33abb1920076d988e1711d5f41b5c9c6d7f92575b4acf0ad4fae6a4ebf0cf19",
+      "bytes": 769035145
+    },
+    {
+      "repo": "lj1995/GPT-SoVITS",
+      "revision": "8f8857563c040d542de108a2c18b0425abd6c9c5",
+      "file": "chinese-roberta-wwm-ext-large/config.json",
+      "sha256": "3d57de2fd7e80d0e5c8ff194f0bbb6baa10df7e43fc262a0cc71298a78b0a3e5",
+      "bytes": 963
+    },
+    {
+      "repo": "lj1995/GPT-SoVITS",
+      "revision": "8f8857563c040d542de108a2c18b0425abd6c9c5",
+      "file": "chinese-roberta-wwm-ext-large/tokenizer.json",
+      "sha256": "173796956820ea27bd14f76bf28162607ff4254807e2948253eb5b46f5bb643b",
+      "bytes": 268962
+    },
+    {
+      "repo": "lj1995/GPT-SoVITS",
+      "revision": "8f8857563c040d542de108a2c18b0425abd6c9c5",
+      "file": "chinese-roberta-wwm-ext-large/pytorch_model.bin",
+      "sha256": "e53a693acc59ace251d143d068096ae0d7b79e4b1b503fa84c9dcf576448c1d8",
+      "bytes": 651225145
+    },
+    {
+      "repo": "lj1995/GPT-SoVITS",
+      "revision": "8f8857563c040d542de108a2c18b0425abd6c9c5",
+      "file": "chinese-hubert-base/config.json",
+      "sha256": "c3e5060a1277e0f078cc6be9da4528a605dba6ece93018981fe2c820e5c7b103",
+      "bytes": 1449
+    },
+    {
+      "repo": "lj1995/GPT-SoVITS",
+      "revision": "8f8857563c040d542de108a2c18b0425abd6c9c5",
+      "file": "chinese-hubert-base/preprocessor_config.json",
+      "sha256": "dcd684124d06722947939d41ea6ae58dbf10968c60a11a29f23ddc602c64a29b",
+      "bytes": 212
+    },
+    {
+      "repo": "lj1995/GPT-SoVITS",
+      "revision": "8f8857563c040d542de108a2c18b0425abd6c9c5",
+      "file": "chinese-hubert-base/pytorch_model.bin",
+      "sha256": "24164f129c66499d1346e2aa55f183250c223161ec2770c0da3d3b08cf432d3c",
+      "bytes": 188811417
+    },
+    {
+      "repo": "nvidia/bigvgan_v2_24khz_100band_256x",
+      "revision": "c329ede9e9bbc100ddf5c91e2330a61921262370",
+      "file": "LICENSE",
+      "sha256": "90459cd52fc41bd723df7c0c76fac1e4dd60e6bfd644a7e2a93f325bed4f6d95",
+      "bytes": 1076
+    },
+    {
+      "repo": "nvidia/bigvgan_v2_24khz_100band_256x",
+      "revision": "c329ede9e9bbc100ddf5c91e2330a61921262370",
+      "file": "config.json",
+      "sha256": "d77e2c96583ca2296ac112a56ec7cc6bd5da4bf7681ceff18448bedc4fcf6512",
+      "bytes": 1402
+    },
+    {
+      "repo": "nvidia/bigvgan_v2_24khz_100band_256x",
+      "revision": "c329ede9e9bbc100ddf5c91e2330a61921262370",
+      "file": "bigvgan_generator.pt",
+      "sha256": "6f9c5715550c9d0f11159ceb8935638da5aeb19e27d1e63677632df095e376f5",
+      "bytes": 450088331
+    },
+    {
+      "source": "GPT-SoVITS documented ModelScope G2PWModel_1.1.zip",
+      "sha256": "b116f6930a7ee55eef6576a8d8e14bf40c1106583439e8ae924b901512379c64",
+      "bytes": 588857174,
+      "pinned": false
+    }
+  ],
+  "runtime": {
+    "python": "3.11.17",
+    "torch": "2.8.0+cu128",
+    "notes": "Isolated environment, read-only shared Index dependencies; SDPA, PyTorch BigVGAN, Python jieba alias."
+  }
+}

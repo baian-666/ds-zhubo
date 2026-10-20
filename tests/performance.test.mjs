@@ -1,3 +1,4 @@
+import {testCapabilities} from './fixtures/performance.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {once} from 'node:events'
@@ -8,6 +9,24 @@ import {Director} from '../apps/cohost/director.mjs'
 import {Scene} from '../apps/cohost/scene.mjs'
 import {Participation} from '../apps/cohost/participation.mjs'
 import {parseParticipation} from '../apps/cohost/participation-model.mjs'
+
+test('recent accepted motion plans are bounded, scope-specific and replace a turn draft',()=>{
+ let now=1000;const p=new Performance({now:()=>now}),target={modelId:'whale',revision:'0123456789abcdef'}
+ p.play('nod',{scope:'a',target,turn:1})
+ const motion={label:'轻侧头',frames:[{ms:400,holdMs:0,pose:{headZ:0.12}},{ms:500,holdMs:0,pose:{headZ:0}}]}
+ p.play('idle',{scope:'a',target,turn:1,motion})
+ assert.equal(p.recentPlans('a',target).length,1)
+ assert.deepEqual(p.recentPlans('a',target)[0].poses,['headZ'])
+ p.recentPlans('a',target)[0].poses.push('mouthOpen')
+ assert.deepEqual(p.recentPlans('a',target)[0].poses,['headZ'])
+ assert.deepEqual(p.recentPlans('b',target),[])
+ assert.deepEqual(p.recentPlans('a',{...target,revision:'fedcba9876543210'}),[])
+ assert.equal(p.play('unknown',{scope:'a',target}),false)
+ assert.equal(p.recentPlans('a',target).length,1)
+ for(let turn=2;turn<10;turn++)p.play('idle',{scope:'a',target,turn})
+ assert.equal(p.recentPlans('a',target).length,6)
+ now+=90001;assert.deepEqual(p.recentPlans('a',target),[])
+})
 
 test('streamed pose prefix survives every split and cannot leak into spoken text',async()=>{
  const source='<perform:smile>才不是大肥鱼！'
@@ -59,6 +78,7 @@ test('server exposes pose intent, strips markers from history and clears after i
  app.listen(0,'127.0.0.1');await once(app,'listening');t.after(()=>{app.close();app.closeAllConnections()})
  const url='http://127.0.0.1:'+app.address().port
  const post=(path,body)=>fetch(url+'/api/'+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+ await post('runtime-profile',{stage:'desktop',owner:'desktop-owner',card:null,capabilities:testCapabilities(['生气'])})
  const answer=await post('reply',{source:'host',text:'大肥鱼'}).then(r=>r.text())
  assert.ok(!answer.includes('<perform:'))
  let state=await fetch(url+'/api/status').then(r=>r.json());assert.equal(state.performance.name,'pout');assert.equal(state.persona,'小鲸鱼')

@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join } from 'node:path'
+import { performanceContracts, performanceSource } from './performance-overlay.mjs'
 
 const root=fileURLToPath(new URL('../',import.meta.url))
 const vendor=join(root,'vendor/airi')
@@ -26,9 +27,9 @@ if(existsSync(localModel)) {
 }
 const destination=join(vendor,'apps/stage-web/src/cohost')
 mkdirSync(destination,{recursive:true})
-for(const name of ['cohost-contract.ts','cohost-parent.ts','use-cohost-performance.ts','motion-sequence.ts','whale-rig.ts','rig-controller.ts']) {
+for(const name of [...performanceContracts,'whale-capabilities.ts','cohost-contract.ts','cohost-parent.ts','use-cohost-performance.ts','motion-sequence.ts','whale-rig.ts','rig-controller.ts','pose-control.ts']) {
   // Node requires source extensions; Vite/tsc resolve the renderer's extensionless imports.
-  const source=Buffer.from(readFileSync(join(root,'integrations/airi',name),'utf8').replaceAll("from './whale-rig.ts'", "from './whale-rig'"))
+  const source=performanceSource(name)
   const path=join(destination,name)
   // Owned overlay files can be updated only when they match the previous installation.
   const saved=join(root,'data/airi-overlay',name)

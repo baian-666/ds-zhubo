@@ -1,3 +1,4 @@
+import {testCapabilities} from './fixtures/performance.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {once} from 'node:events'
@@ -32,7 +33,7 @@ test('sampling preserves phase, smooths targets and fades between expression own
  assert.equal(sequenceDuration(motion),3400)
  assert.equal(sampleMotionSequence(motion,400).pose.eyeX,-0.3)
  const middle=sampleMotionSequence(motion,2100)
- assert.equal(middle.step,2);assert.equal(middle.expression.strength,0)
+ assert.equal(middle.step,2);assert.equal(middle.expressions.at(-1).strength,0)
  assert.ok(Math.abs(middle.pose.eyeX+0.1)<1e-9)
  assert.equal(sampleMotionSequence(motion,3400).finished,true)
 })
@@ -86,6 +87,7 @@ test('server keeps free controls out of history, rejects invalid preview and can
  app.listen(0,'127.0.0.1');await once(app,'listening');t.after(()=>{app.close();app.closeAllConnections()})
  const base='http://127.0.0.1:'+app.address().port
  const post=(path,body)=>fetch(base+'/api/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+ await post('runtime-profile',{stage:'desktop',owner:'desktop-owner',card:null,capabilities:testCapabilities()})
  const reply=await(await post('reply',{source:'host',text:'又摸鱼？'})).text()
  assert.ok(!reply.includes('<act:'));assert.ok(!reply.includes('"frames"'))
  let status=await fetch(base+'/api/status').then(r=>r.json())
@@ -115,12 +117,12 @@ test('target expression stays visible for its hold, including the last frame',()
  assert.equal(sequenceDuration(short),1100)
  for(const at of [300,600,1099]){
   const sample=sampleMotionSequence(short,at)
-  assert.equal(sample.finished,false);assert.equal(sample.expression.strength,0.7);assert.equal(sample.pose.headZ,0.2)
+  assert.equal(sample.finished,false);assert.equal(sample.expressions.at(-1).strength,0.7);assert.equal(sample.pose.headZ,0.2)
  }
  assert.equal(sampleMotionSequence(short,1100).finished,true)
  const explicit={...short,frames:[{...short.frames[0],holdMs:1400}]}
  assert.equal(sequenceDuration(parseMotionSequence(explicit)),1700)
- assert.equal(sampleMotionSequence(explicit,1699).expression.strength,0.7)
+ assert.equal(sampleMotionSequence(explicit,1699).expressions.at(-1).strength,0.7)
  assert.equal(sequenceDuration({...short,frames:[{...short.frames[0],holdMs:0}]}),300)
  for(const holdMs of [-1,1801,NaN,1.5,'800'])assert.equal(parseMotionSequence({...short,frames:[{...short.frames[0],holdMs}]}),null)
  assert.equal(parseMotionSequence({...short,frames:Array(4).fill({...short.frames[0],ms:1000,holdMs:1800})}),null)

@@ -3,6 +3,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { keyValid as qwenKeyValid } from './qwen-credential.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const same = (a, b) => {
@@ -11,21 +12,23 @@ const same = (a, b) => {
 }
 
 // Only this ignored local setting is changed. Existing credentials are never returned.
-export function saveVoiceKey(envPath, key) {
-  if (typeof key !== 'string' || !/^[A-Za-z0-9_-]{16,512}$/.test(key))
+export function saveVoiceKey(envPath, key, name = 'SILICONFLOW_API_KEY') {
+  if (!['SILICONFLOW_API_KEY', 'DASHSCOPE_API_KEY'].includes(name)) throw new Error('不支持的凭据名称。')
+  if (name === 'DASHSCOPE_API_KEY' ? !qwenKeyValid(key) : typeof key !== 'string' || !/^[A-Za-z0-9_-]{16,512}$/.test(key))
     throw new Error('密钥格式不正确，请只粘贴 API 密钥。')
   const previous = existsSync(envPath) ? readFileSync(envPath, 'utf8') : ''
   const lines = previous.split(/\r?\n/)
+  const assignment = new RegExp('^\\s*(?:export\\s+)?' + name + '\\s*=')
   let inserted = false
   const updated = lines.filter(line => {
-    if (!/^\s*(?:export\s+)?SILICONFLOW_API_KEY\s*=/.test(line)) return true
+    if (!assignment.test(line)) return true
     if (inserted) return false
     inserted = true
     return true
-  }).map(line => /^\s*(?:export\s+)?SILICONFLOW_API_KEY\s*=/.test(line) ? 'SILICONFLOW_API_KEY=' + key : line)
+  }).map(line => assignment.test(line) ? name + '=' + key : line)
   if (!inserted) {
     if (updated.at(-1) === '') updated.pop()
-    updated.push('SILICONFLOW_API_KEY=' + key, '')
+    updated.push(name + '=' + key, '')
   }
   const staging = join(dirname(envPath), 'data', 'credential-staging')
   mkdirSync(staging, {recursive:true})

@@ -1,0 +1,286 @@
+diff --git a/apps/stage-tamagotchi/src/main/services/airi/http-server/static-assets/paths.test.ts b/apps/stage-tamagotchi/src/main/services/airi/http-server/static-assets/paths.test.ts
+index cff0a8b..1c29677 100644
+--- a/apps/stage-tamagotchi/src/main/services/airi/http-server/static-assets/paths.test.ts
++++ b/apps/stage-tamagotchi/src/main/services/airi/http-server/static-assets/paths.test.ts
+@@ -74,7 +74,7 @@ describe('static asset paths', () => {
+     await mkdir(join(root, 'dist', 'ui'), { recursive: true })
+     await writeFile(join(root, 'dist', 'ui', 'index.html'), '<html></html>')
+ 
+-    await expect(resolveStaticAssetFilePath(root, 'dist/ui/index.html')).resolves.toContain('dist/ui/index.html')
++    await expect(resolveStaticAssetFilePath(root, 'dist/ui/index.html')).resolves.toBe(join(root, 'dist', 'ui', 'index.html'))
+     await expect(resolveStaticAssetFilePath(root, '../outside.txt')).resolves.toBeUndefined()
+   })
+ 
+diff --git a/apps/stage-tamagotchi/src/renderer/bridges/electron-auth-callback.browser.test.ts b/apps/stage-tamagotchi/src/renderer/bridges/electron-auth-callback.browser.test.ts
+index 2ce3348..b22d308 100644
+--- a/apps/stage-tamagotchi/src/renderer/bridges/electron-auth-callback.browser.test.ts
++++ b/apps/stage-tamagotchi/src/renderer/bridges/electron-auth-callback.browser.test.ts
+@@ -6,6 +6,7 @@ import { createPinia, disposePinia, setActivePinia } from 'pinia'
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+ 
+ import { electronAuthCallback, electronAuthComplete, electronAuthGetStatus, electronAuthStatus } from '../../shared/eventa'
++import { i18n } from '../modules/i18n'
+ import { useAuthStatusStore } from '../stores/auth-status'
+ import { initializeElectronAuthCallbackBridge } from './electron-auth-callback'
+ 
+@@ -21,6 +22,7 @@ vi.mock('@proj-airi/stage-ui/libs/auth-client', async importOriginal => ({
+ 
+ let pinia: ReturnType<typeof createPinia>
+ let reports: Array<Pick<ElectronAuthStatus, 'attemptId' | 'error'>>
++const initialLocale = i18n.global.locale.value
+ beforeEach(() => {
+   pinia = createPinia()
+   setActivePinia(pinia)
+@@ -33,6 +35,7 @@ beforeEach(() => {
+   })
+ })
+ afterEach(() => {
++  i18n.global.locale.value = initialLocale
+   disposePinia(pinia)
+   localStorage.clear()
+ })
+@@ -53,14 +56,18 @@ describe('electron auth callback bridge', () => {
+     expect(useAuthStore().isAuthenticated).toBe(true)
+   })
+ 
+-  it('reports an error when token exchange succeeds but session confirmation returns false', async () => {
++  it.each([
++    ['en', 'Could not confirm'],
++    ['zh-Hans', '未能确认登录会话'],
++  ] as const)('reports a localized %s error when session confirmation returns false', async (locale, expected) => {
+     // ROOT CAUSE:
+     // completeSignIn returns false on a missing session. The callback bridge
+     // previously ignored that result and had no visible completion feedback.
+     boundary.session.mockResolvedValue(null)
++    i18n.global.locale.value = locale
+     initializeElectronAuthCallbackBridge()
+     boundary.context!.emit(electronAuthCallback, tokens)
+-    await expect.poll(() => reports[0]?.error).toContain('Could not confirm')
++    await expect.poll(() => reports[0]?.error).toContain(expected)
+     expect(useAuthStore().isAuthenticated).toBe(false)
+   })
+ 
+diff --git a/apps/stage-tamagotchi/vitest.config.ts b/apps/stage-tamagotchi/vitest.config.ts
+index 61945f9..bcc0a2d 100644
+--- a/apps/stage-tamagotchi/vitest.config.ts
++++ b/apps/stage-tamagotchi/vitest.config.ts
+@@ -6,7 +6,7 @@ import Info from 'unplugin-info/vite'
+ 
+ import { DownloadLive2DSDK } from '@proj-airi/unplugin-live2d-sdk'
+ import { playwright } from '@vitest/browser-playwright'
+-import { loadEnv } from 'vite'
++import { loadEnv, normalizePath } from 'vite'
+ import { defineConfig } from 'vitest/config'
+ 
+ import unoConfig from './uno.config'
+@@ -31,10 +31,10 @@ export default defineConfig({
+       content: {
+         ...unoConfig.content,
+         filesystem: [
+-          `${import.meta.dirname}/src/**/*.vue`,
+-          `${import.meta.dirname}/../../packages/stage-layouts/src/**/*.vue`,
+-          `${import.meta.dirname}/../../packages/stage-ui/src/**/*.vue`,
+-          `${import.meta.dirname}/../../packages/ui/src/**/*.vue`,
++          `${normalizePath(import.meta.dirname)}/src/**/*.vue`,
++          `${normalizePath(import.meta.dirname)}/../../packages/stage-layouts/src/**/*.vue`,
++          `${normalizePath(import.meta.dirname)}/../../packages/stage-ui/src/**/*.vue`,
++          `${normalizePath(import.meta.dirname)}/../../packages/ui/src/**/*.vue`,
+         ],
+       },
+     }),
+diff --git a/apps/ui-server-auth/src/cloudflare-pages-routing.test.ts b/apps/ui-server-auth/src/cloudflare-pages-routing.test.ts
+index 85d9673..d661aa8 100644
+--- a/apps/ui-server-auth/src/cloudflare-pages-routing.test.ts
++++ b/apps/ui-server-auth/src/cloudflare-pages-routing.test.ts
+@@ -25,7 +25,7 @@ describe('cloudflare Pages routing', () => {
+   })
+ 
+   it('requires old and current asset namespaces to revalidate cached responses', async () => {
+-    const headers = await readFile(resolve(publicDirectory, '_headers'), 'utf8')
++    const headers = (await readFile(resolve(publicDirectory, '_headers'), 'utf8')).replaceAll('\r\n', '\n')
+ 
+     expect(headers).toContain('/assets/*\n  cache-control: public, no-cache')
+     expect(headers).toContain('/assets-v2/*\n  cache-control: public, no-cache')
+diff --git a/packages/cap-vite/src/index.test.ts b/packages/cap-vite/src/index.test.ts
+index c206d20..51fb8a6 100644
+--- a/packages/cap-vite/src/index.test.ts
++++ b/packages/cap-vite/src/index.test.ts
+@@ -19,7 +19,7 @@ describe('prepareCapViteLaunch', () => {
+       configLoader: 'runner',
+       projectRoot: process.cwd(),
+       viteArgs: ['--host', '0.0.0.0', '--configLoader', 'runner'],
+-      wrapperConfigFile: expect.stringMatching(/packages\/cap-vite\/(src|dist)\/vite-wrapper-config\.(ts|mjs)$/),
++      wrapperConfigFile: expect.stringMatching(/packages[/\\]cap-vite[/\\](src|dist)[/\\]vite-wrapper-config\.(ts|mjs)$/),
+     })
+   })
+ 
+@@ -31,7 +31,7 @@ describe('prepareCapViteLaunch', () => {
+       configLoader: undefined,
+       projectRoot: resolve(process.cwd(), 'apps/stage-pocket'),
+       viteArgs: ['apps/stage-pocket', '--host', '0.0.0.0'],
+-      wrapperConfigFile: expect.stringMatching(/packages\/cap-vite\/(src|dist)\/vite-wrapper-config\.(ts|mjs)$/),
++      wrapperConfigFile: expect.stringMatching(/packages[/\\]cap-vite[/\\](src|dist)[/\\]vite-wrapper-config\.(ts|mjs)$/),
+     })
+   })
+ 
+@@ -58,7 +58,7 @@ describe('runCapVite', () => {
+ 
+     expect(x).toHaveBeenCalledWith('vite', [
+       '--config',
+-      expect.stringMatching(/packages\/cap-vite\/(src|dist)\/vite-wrapper-config\.(ts|mjs)$/),
++      expect.stringMatching(/packages[/\\]cap-vite[/\\](src|dist)[/\\]vite-wrapper-config\.(ts|mjs)$/),
+       '--host',
+       '0.0.0.0',
+       '--configLoader=runner',
+diff --git a/packages/cap-vite/src/vite-plugin.test.ts b/packages/cap-vite/src/vite-plugin.test.ts
+index 6f3d470..77a84db 100644
+--- a/packages/cap-vite/src/vite-plugin.test.ts
++++ b/packages/cap-vite/src/vite-plugin.test.ts
+@@ -3,6 +3,7 @@ import type { Plugin } from 'vite'
+ import process from 'node:process'
+ 
+ import { EventEmitter } from 'node:events'
++import { resolve } from 'node:path'
+ 
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+ 
+@@ -52,7 +53,7 @@ function createMockServer() {
+         error: vi.fn(),
+         info: vi.fn(),
+       },
+-      root: '/repo/app',
++      root: resolve('repo', 'app'),
+     },
+     httpServer,
+     resolvedUrls: {
+@@ -133,7 +134,7 @@ describe('capVitePlugin', () => {
+     expect(stdin.setRawMode).toHaveBeenCalledWith(true)
+     expect(x).toHaveBeenNthCalledWith(1, 'cap', ['run', 'ios', '--target', 'iPhone 16 Pro', '--scheme', 'AIRI'], {
+       nodeOptions: {
+-        cwd: '/repo/app',
++        cwd: resolve('repo', 'app'),
+         env: {
+           CAPACITOR_DEV_SERVER_URL: 'http://127.0.0.1:5173/',
+         },
+@@ -149,7 +150,7 @@ describe('capVitePlugin', () => {
+       expect(server.config.logger.info).toHaveBeenCalledWith('[cap-vite] manual restart requested. Re-running "cap run ios --target iPhone 16 Pro --scheme AIRI".')
+       expect(x).toHaveBeenNthCalledWith(2, 'cap', ['run', 'ios', '--target', 'iPhone 16 Pro', '--scheme', 'AIRI'], {
+         nodeOptions: {
+-          cwd: '/repo/app',
++          cwd: resolve('repo', 'app'),
+           env: {
+             CAPACITOR_DEV_SERVER_URL: 'http://127.0.0.1:5173/',
+           },
+diff --git a/packages/plugin-sdk/src/plugin-host/core.test.ts b/packages/plugin-sdk/src/plugin-host/core.test.ts
+index 7dd9ebd..b7a4c05 100644
+--- a/packages/plugin-sdk/src/plugin-host/core.test.ts
++++ b/packages/plugin-sdk/src/plugin-host/core.test.ts
+@@ -1286,6 +1286,7 @@ describe('for FileSystemLoader', () => {
+ 
+   it('should resolve entrypoint by runtime then default', () => {
+     const host = new FileSystemLoader()
++    const root = join(import.meta.dirname, 'testdata', 'extension')
+     const baseManifest = {
+       manifestVersion: 2,
+       kind: 'manifest.extension.airi.moeru.ai' as const,
+@@ -1311,14 +1312,14 @@ describe('for FileSystemLoader', () => {
+       },
+     }
+     expect(host.resolveEntrypointFor(runtimeEntryManifest, {
+-      cwd: '/tmp/extension',
++      cwd: root,
+       runtime: 'node',
+-    })).toBe('/tmp/extension/node-entry.ts')
++    })).toBe(join(root, 'node-entry.ts'))
+ 
+     expect(host.resolveEntrypointFor(defaultFallbackManifest, {
+-      cwd: '/tmp/extension',
++      cwd: root,
+       runtime: 'node',
+-    })).toBe('/tmp/extension/default-entry.ts')
++    })).toBe(join(root, 'default-entry.ts'))
+   })
+ 
+   it('should reject a runtime that the extension does not support', () => {
+diff --git a/packages/stage-ui/src/libs/providers/providers/provider-definitions.test.ts b/packages/stage-ui/src/libs/providers/providers/provider-definitions.test.ts
+index f95f53f..5a6975a 100644
+--- a/packages/stage-ui/src/libs/providers/providers/provider-definitions.test.ts
++++ b/packages/stage-ui/src/libs/providers/providers/provider-definitions.test.ts
+@@ -2,7 +2,7 @@ import type { ProviderTranslator } from '@proj-airi/provider-inference'
+ 
+ import type { StageProviderId } from './registry'
+ 
+-import { describe, expect, expectTypeOf, it } from 'vitest'
++import { describe, expect, expectTypeOf, it, vi } from 'vitest'
+ import { z } from 'zod'
+ 
+ import { providerAliyunNlsTranscription } from './aliyun-nls'
+@@ -143,15 +143,21 @@ describe('migrated provider definitions', () => {
+     expect(configured?.valid).toBe(true)
+   })
+ 
+-  it('accepts each Sherpaw model and rejects unsupported model IDs', async () => {
+-    const definition = getRequiredProvider('sherpaw-transcription')
+-    const schema = await definition.createProviderConfig({ t: translate })
+-
+-    expect(z.parse(schema, {})).toEqual({ model: 'paraformer-zh-en', modelLanguageFilter: 'en' })
+-    for (const model of ['paraformer-zh-en', 'zipformer-multilingual', 'x-asr-zh-en-480ms-int8'])
+-      expect(z.parse(schema, { model })).toEqual({ model, modelLanguageFilter: 'en' })
+-    expect(z.safeParse(schema, { model: 'zipformer-zh-en' }).success).toBe(false)
+-    expect(z.safeParse(schema, { model: 'unknown-model' }).success).toBe(false)
++  it.each([['en-US', 'en'], ['zh-CN', 'zh']])('accepts each Sherpaw model with the %s system language', async (language, filter) => {
++    vi.stubGlobal('navigator', { language })
++    try {
++      const definition = getRequiredProvider('sherpaw-transcription')
++      const schema = await definition.createProviderConfig({ t: translate })
++
++      expect(z.parse(schema, {})).toEqual({ model: 'paraformer-zh-en', modelLanguageFilter: filter })
++      for (const model of ['paraformer-zh-en', 'zipformer-multilingual', 'x-asr-zh-en-480ms-int8'])
++        expect(z.parse(schema, { model })).toEqual({ model, modelLanguageFilter: filter })
++      expect(z.safeParse(schema, { model: 'zipformer-zh-en' }).success).toBe(false)
++      expect(z.safeParse(schema, { model: 'unknown-model' }).success).toBe(false)
++    }
++    finally {
++      vi.unstubAllGlobals()
++    }
+   })
+ 
+   it('describes Web Speech API streaming support without runtime state', async () => {
+diff --git a/packages/stage-ui/src/stores/modules/speech-settings.browser.test.ts b/packages/stage-ui/src/stores/modules/speech-settings.browser.test.ts
+index 9db58d2..56cb966 100644
+--- a/packages/stage-ui/src/stores/modules/speech-settings.browser.test.ts
++++ b/packages/stage-ui/src/stores/modules/speech-settings.browser.test.ts
+@@ -99,7 +99,8 @@ it.each(['mount', 'provider change'])('handles interrupted model discovery after
+     interrupt = true
+     await leader.speech.selectProviderModel('microsoft-speech', 'v1')
+   }
+-  await vi.waitFor(() => expect(blocked).toBeGreaterThan(0))
++  // The settings route loads its native form asynchronously on first visit.
++  await vi.waitFor(() => expect(blocked).toBeGreaterThan(0), { timeout: 10_000 })
+   follower.runtime.dispose()
+   await vi.waitFor(() => expect(globalErrors.mock.calls.length > 0 || follower.container.textContent?.includes('Pinia sync runtime was disposed before the RPC completed.')).toBe(true))
+   expect(globalErrors).not.toHaveBeenCalled()
+diff --git a/packages/stage-ui/vitest.config.ts b/packages/stage-ui/vitest.config.ts
+index abe37c6..a7dd05d 100644
+--- a/packages/stage-ui/vitest.config.ts
++++ b/packages/stage-ui/vitest.config.ts
+@@ -7,7 +7,7 @@ import VueRouter from 'vue-router/vite'
+ 
+ import { playwright } from '@vitest/browser-playwright'
+ import { mergeConfigs } from 'unocss'
+-import { loadEnv } from 'vite'
++import { loadEnv, normalizePath } from 'vite'
+ import { defineConfig } from 'vitest/config'
+ 
+ import { sharedUnoConfig } from '../../uno.config'
+@@ -41,8 +41,8 @@ export default defineConfig({
+       // the initial CSS response instead of relying on Vite's HMR updates.
+       content: {
+         filesystem: [
+-          `${import.meta.dirname}/src/**/*.vue`,
+-          `${import.meta.dirname}/../ui/src/**/*.vue`,
++          `${normalizePath(import.meta.dirname)}/src/**/*.vue`,
++          `${normalizePath(import.meta.dirname)}/../ui/src/**/*.vue`,
+         ],
+       },
+     }])),

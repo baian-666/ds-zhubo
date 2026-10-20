@@ -73,6 +73,46 @@ test('quoted stop phrase does not interrupt; exact command does', () => {
   assert.equal(turn.controller.signal.aborted, true)
 })
 
+test('repeated and combined host stop commands cancel once and stay quiet until new speech', () => {
+  for (const command of ['停停停，等一下，先打住。', '打住，打住，打住。', '小鲸鱼，先停一下！', '停一下', '先听我讲完。', '小鲸鱼，先让我说完！', '等一下，我还没讲完。', '等我说完。']) {
+    const s = setup()
+    const turn = s.scheduler.beginHost('长回答')
+    s.start(1)
+    s.text(1, command)
+    assert.equal(turn.controller.signal.aborted, true, command)
+    assert.equal(turn.controller.signal.reason, 'host_stop')
+    s.end(1)
+    assert.equal(s.director.trace.filter(e => e.action === 'stop').length, 1)
+    assert.equal(s.director.candidate, null)
+    assert.equal(s.director.consumedUtterance, 1)
+    assert.equal(s.director.intent, 'stop')
+    s.start(2); s.text(2, '助播，你怎么看？'); s.end(2)
+    assert.ok(s.director.candidate)
+    s.director.close()
+  }
+})
+
+test('stop detection rejects quotes, negation, discussion and unconfirmed ASR', () => {
+  for (const text of ['他喊停停停，等一下，先打住。', '不要停，继续说', '不是让你停一下', '“打住，打住”是什么意思？', '如果我说停一下，你会怎么办？', '等一下我给你讲个故事', '嗯，对', '小鲸鱼说停一下', '她说“先听我讲完”，我笑了。', '不是让你等我说完，你继续。', '如果我说先听我讲完呢？', '先听我讲完是什么意思？']) {
+    const s = setup()
+    const turn = s.scheduler.beginHost('继续回答')
+    s.start(1); s.text(1, text); s.end(1)
+    assert.equal(turn.controller.signal.aborted, false, text)
+    s.director.close()
+  }
+  const s = setup()
+  const turn = s.scheduler.beginHost('继续回答')
+  s.start(1); s.text(1, '停停停', false)
+  assert.equal(turn.controller.signal.aborted, false)
+  s.text(1, '停停停是游戏里的台词。'); s.end(1)
+  assert.equal(turn.controller.signal.aborted, false)
+  s.start(2);s.text(2,'先听我讲完',false)
+  assert.equal(turn.controller.signal.aborted,false)
+  s.text(2,'先听我讲完是他当时的原话。');s.end(2)
+  assert.equal(turn.controller.signal.aborted,false)
+  s.director.close()
+})
+
 test('expired or invalidated handover cannot start a reply', () => {
   const s = setup()
   s.start(1); s.text(1, '助播，你怎么看？')
@@ -154,6 +194,19 @@ test('slow semantic adapter never blocks explicit handover; timeout result canno
   resolve({ intent: 'stop', confidence: 1 })
   await nextTick()
   assert.equal(s.scheduler.isCurrent(turn), true)
+  s.director.close()
+})
+
+test('cancelled semantic adapter does not block a newer review or log errors after closing',async()=>{
+  const jobs=[]
+  const s=setup({classify:(snapshot,{signal})=>new Promise((resolve,reject)=>jobs.push({snapshot,signal,resolve,reject}))})
+  s.start(1);s.text(1,'第一个想法',false);await nextTick()
+  s.start(2);s.text(2,'第二个想法',false);await nextTick()
+  assert.equal(jobs.length,2);assert.equal(jobs[0].signal.aborted,true)
+  assert.equal(jobs[1].snapshot.utterance.text,'第二个想法')
+  s.director.close();const count=s.director.trace.length
+  jobs[0].reject(Error('old failure'));jobs[1].resolve({intent:'stop',confidence:1});await nextTick()
+  assert.equal(s.director.trace.length,count);assert.equal(s.director.status().semanticBusy,false)
 })
 
 test('proactive participation is budgeted; explicit handover bypasses that cooldown', () => {

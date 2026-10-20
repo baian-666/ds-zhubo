@@ -8,7 +8,7 @@ function check(dir) {
     const path = join(dir, entry.name)
     if (entry.isDirectory()) check(path)
     else if (path.endsWith('.json')) JSON.parse(readFileSync(path, 'utf8'))
-    else if (path.endsWith('.mjs')) {
+    else if (path.endsWith('.mjs') || (path.startsWith('packages') && path.endsWith('.ts'))) {
       const result = spawnSync(process.execPath, ['--check', path], { stdio: 'inherit' })
       if (result.error || result.status !== 0) throw new Error(`Syntax check failed: ${path}`)
     }

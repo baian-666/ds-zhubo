@@ -1,16 +1,16 @@
 # DS 助播 · AIRI + DeepSeek
 
-面向聊天陪伴、知识分享的 Live2D AI 助播。真人主播主导，AI 自然接话、选择性回复弹幕。目标平台为 B 站和微信视频号，不包含游戏操作。
+面向聊天陪伴、知识分享的 Live2D AI 主播“小鲸鱼”。由她自主主持，真人作为搭档加入；保留原助播方式，自然接话并选择性回复弹幕。目标平台为 B 站和微信视频号，不包含游戏操作。
 
 **当前是 Windows 本机试播原型，尚不是可直接开播的产品。** 已有 AIRI 桌面/网页直播侧栏、同角色聊天气泡与导演时间线、DeepSeek 自主参与、小鲸鱼人格、鲸鱼娘 Live2D 连续表演，以及 AIRI 语音识别、合成和口型。真人识别质量、自然话轮和长期稳定性尚未验收；真实平台弹幕和生产部署未完成。
 
-当前需求与实施顺序见 [开发基线](docs/DEVELOPMENT-BASELINE.md)。
+接续工作先读 [当前状态](docs/STATUS.md)，需要细节再查 [文档入口](docs/README.md)；保存/找回旧版见 [版本存档](docs/VERSIONS.md)。
 
 当前推荐：本机安装后双击 `启动小鲸鱼.cmd` 使用桌面版，`启动网页版.cmd` 为备用。详见 [AIRI 直播入口与设置](docs/AIRI-CONSOLE.md)、[桌面与语音试播](docs/DESKTOP-VOICE.md)、[本地开发](docs/LOCAL-DEVELOPMENT.md)。下方云端配置保留为备选路径。
 
 ## 在另一台设备继续
 
-当前主力为本机 Windows，换设备先同步已保存代码。云端开发作为备选；先阅读 [云端开发接续](docs/CLOUD.md)、[完整交接](docs/HANDOFF.md) 和 [当前状态](docs/STATUS.md)。
+当前主力为本机 Windows，换设备先核对 [版本存档的恢复范围](docs/VERSIONS.md)，并同步已保存代码。云端开发作为备选，仅在云端工作时阅读 [云端开发接续](docs/CLOUD.md)；[原始交接](docs/HANDOFF.md) 保留早期需求。
 
 本仓库含开发草稿和项目上下文。云端对话、GitHub 代码备份、Codex Cloud 执行环境是三件独立的事。只有选中并发布关联本仓库的 Codex Cloud 环境后，才能在该环境中继续执行开发任务。
 

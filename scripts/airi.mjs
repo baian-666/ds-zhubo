@@ -2,11 +2,13 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
+import { airiEnvironment } from './airi-toolchain.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const lock = JSON.parse(readFileSync(join(root, 'airi.lock.json'), 'utf8'))
 const target = join(root, 'vendor', 'airi')
 const action = process.argv[2]
+const env = airiEnvironment()
 
 function run(command, args, cwd = target, capture = false) {
   if (command === 'pnpm' && process.platform === 'win32') {
@@ -15,17 +17,21 @@ function run(command, args, cwd = target, capture = false) {
     args = [cli, ...args]
     command = process.execPath
   }
-  const result = spawnSync(command, args, { cwd, encoding: 'utf8', stdio: capture ? 'pipe' : 'inherit' })
+  const result = spawnSync(command, args, { cwd, env, encoding: 'utf8', stdio: capture ? 'pipe' : 'inherit' })
   if (result.error || result.status !== 0)
     throw new Error(`${command} failed. ${result.error?.message ?? result.stderr ?? ''}`)
   return result.stdout?.trim()
 }
 
-if (!['setup', 'setup-web', 'dev'].includes(action)) throw new Error('Use setup or dev.')
+if (!['setup', 'setup-web', 'setup-checks', 'dev'].includes(action)) throw new Error('Use setup, setup-web, setup-checks or dev.')
 if (process.versions.node !== lock.node) throw new Error(`Use Node ${lock.node} from the local toolchain.`)
 if (run('pnpm', ['--version'], root, true) !== lock.pnpm) throw new Error(`Use pnpm ${lock.pnpm}.`)
 
-if (action === 'setup' || action === 'setup-web') {
+if (action === 'setup-checks') {
+  if (run('git', ['rev-parse', 'HEAD'], target, true) !== lock.commit) throw new Error('AIRI revision differs from airi.lock.json.')
+  run('pnpm', ['install', '--frozen-lockfile', '--ignore-scripts'])
+  run(process.execPath, [join(root,'scripts/patch-checks.mjs')], root)
+} else if (action === 'setup' || action === 'setup-web') {
   mkdirSync(target, { recursive: true })
   if (!existsSync(join(target, '.git'))) {
     run('git', ['init'])
@@ -46,7 +52,7 @@ if (action === 'setup' || action === 'setup-web') {
   if (run('git', ['rev-parse', 'HEAD'], target, true) !== lock.commit) throw new Error('AIRI revision differs from airi.lock.json.')
   // Vite accepts only the current private Codespaces host, rather than every host.
   if (process.env.CODESPACE_NAME && process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN)
-    process.env.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS = `${process.env.CODESPACE_NAME}-5173.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`
+    env.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS = `${process.env.CODESPACE_NAME}-5173.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`
   run(process.execPath, [join(root,'scripts/patch-airi.mjs')], root)
   run('pnpm', ['-F', '@proj-airi/stage-web', 'exec', 'vite', '--host', '127.0.0.1', '--port', '5173', '--strictPort'])
 }

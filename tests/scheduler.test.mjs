@@ -73,3 +73,17 @@ test('operator choice wins, host turn supersedes viewer, queue is bounded', () =
   assert.equal(viewer.controller.signal.aborted, true)
   assert.equal(scheduler.isCurrent(host), true)
 })
+
+test('hosting bounds per-viewer spam and gives different viewers places in the model shortlist',()=>{
+  let now=0;const s=new Scheduler({now:()=>now});s.hostingViewers=()=>true
+  assert.equal(s.enqueue(message('first',{userId:'spam',text:'重复刷屏',mentioned:false})),true)
+  assert.equal(s.enqueue(message('duplicate',{userId:'spam',text:'重复刷屏',mentioned:false})),false)
+  for(let i=0;i<20;i++)s.enqueue(message('spam-'+i,{userId:'spam',text:'刷屏'+i,mentioned:false}))
+  assert.equal(s.queue.filter(x=>x.userId==='spam').length,3)
+  for(let i=0;i<16;i++)s.enqueue(message('viewer-'+i,{mentioned:false}))
+  assert.equal(new Set(s.eligibleViewers().slice(0,16).map(x=>x.userId)).size,16)
+  now=10001;assert.equal(s.enqueue(message('retry',{userId:'spam',text:'重复刷屏'})),true)
+  assert.equal(s.enqueue(message('retry',{userId:'spam',text:'另一个文本'})),false,'stable IDs remain deduplicated')
+  for(let i=0;i<200;i++)s.enqueue(message('other-'+i))
+  assert.equal(s.queue.length,128)
+})

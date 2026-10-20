@@ -26,10 +26,24 @@ test('token protects control API and status does not expose credentials', async 
   const token = 'test-token-only-24-characters'
   const app = await start(t, { apiKey: 'private-provider-key', token })
   assert.equal((await app.get('/api/status')).status, 401)
+  assert.equal((await app.get('/api/stage-performance')).status, 401)
   assert.equal((await app.post('/api/mute', { value: true })).status, 401)
   const response = await app.post('/api/mute', { value: true }, { Authorization: `Bearer ${token}` })
   assert.equal(response.status, 200)
   assert.equal((await response.text()).includes('private-provider-key'), false)
+})
+
+test('stage heartbeat omits chat history and preserves the performance command', async t => {
+  const app=await start(t,{apiKey:'',token:''})
+  const full=await (await app.get('/api/status')).json()
+  const response=await app.get('/api/stage-performance')
+  assert.equal(response.status,200)
+  const compact=await response.json()
+  assert.deepEqual(Object.keys(compact),['performance'])
+  assert.equal(compact.performance.session,full.room.session)
+  assert.equal(compact.performance.id,full.performance.id)
+  assert.equal(compact.performance.name,full.performance.name)
+  assert.ok(JSON.stringify(compact).length<JSON.stringify(full).length/2)
 })
 
 test('native AIRI CORS preserves authentication and rejects unrelated origins', async t => {
@@ -51,7 +65,9 @@ test('live room consumes a text decision once without an open console response s
   let calls=0
   let completed
   const delivered=new Promise(resolve=>{completed=resolve})
-  const app=await start(t,{apiKey:'test-key',token:'',reply:async function*(){calls++;yield '收到，我接一句。';completed()},planner:async()=>({action:'wait',reason:'先听'})})
+  const app=await start(t,{apiKey:'test-key',token:'',reply:async function*(){assert.fail('separate reply generation')},planner:async()=>{
+    calls++;return {action:'reply_host',hostIntent:'invited',reason:'接到明确邀请',text:'收到，我接一句。',targetId:'',platform:'',replyStream:{close(){},async *[Symbol.asyncIterator](){yield {kind:'speech',text:'收到，我接一句。'};completed()}}}
+  }})
   assert.equal((await app.post('/api/live/start',{})).status,200)
   assert.equal((await app.post('/api/live/start',{})).status,200)
   await app.post('/api/director/event',{type:'speech-start',utterance:1})
@@ -183,6 +199,42 @@ test('audio history follows acknowledged playback and stale audio cannot resume'
   await (await app.post('/api/reply', { source: 'host', text: '继续' })).text()
   assert.equal(seen[1][1].content, '第一句。')
   assert.equal(seen[1].length, 2)
+})
+
+test('host reclaiming the floor cancels acknowledged audio and rejects stale playback', async t => {
+  for (const text of ['先听我讲完。', '我有个例子，先听我讲完，后面还有反转。我买了跑步机，后来它变成了晾衣架，先别猜，我还有后半段。']) {
+    let plans=0
+    const app=await start(t,{apiKey:'test-only',token:'',semanticEnabled:true,participationOptions:{debounceMs:1},
+      planner:async()=>{plans++;return {action:'wait',yieldToHost:true,hostIntent:'none',text:'',reason:'搭档要先讲完，停止当前语音并倾听。'}},
+      reply:async function*(){yield '第一句。第二句。'}})
+    await app.post('/api/director/event',{type:'mode',value:'auto'})
+    const response=await app.post('/api/reply',{source:'host',text:'讲个故事',delivery:'audio'})
+    const events=(await response.text()).trim().split('\n').map(JSON.parse)
+    const {turn,audioId}=events[0]
+    await app.post('/api/playback',{turn,audioId,event:'started'})
+    await app.post('/api/playback',{turn,audioId,event:'progress',playedChars:4})
+    for(const e of [{type:'speech-start'},{type:'transcript',text,final:true},{type:'speech-end'}])
+      await app.post('/api/director/event',{...e,utterance:1})
+    let state
+    for(let n=0;n<100;n++) {
+      state=await (await app.get('/api/status')).json()
+      if(!state.busy)break
+      await new Promise(resolve=>setTimeout(resolve,10))
+    }
+    assert.equal(state.busy,false,text)
+    assert.equal(state.director.intent,'stop')
+    assert.equal(state.hosting.state,'off','an inactive hosting session must not start')
+    const delivered=state.room.entries.findLast(e=>e.role==='assistant')
+    assert.equal(delivered.status,'cancelled')
+    assert.equal(delivered.playedChars,4)
+    assert.equal(delivered.interruptionReason,'host_stop')
+    assert.equal(plans,text==='先听我讲完。'?0:1)
+    assert.equal((await (await app.post('/api/playback',{turn,audioId,event:'ended',playedChars:8})).json()).accepted,false)
+    await app.post('/api/danmaku',{id:'heckle',platform:'manual',userId:'viewer',text:'别管主播，继续讲',mentioned:true})
+    state=await (await app.get('/api/status')).json()
+    assert.equal(state.busy,false)
+    assert.equal(state.hosting.state,'off')
+  }
 })
 
 test('failed text generation does not pollute history with a partial reply', async t => {

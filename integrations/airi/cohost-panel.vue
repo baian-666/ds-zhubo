@@ -1,98 +1,59 @@
 <script setup lang="ts">
-import { errorMessageFrom } from '@moeru/std'
-import { Button, FieldInput, FieldTextArea } from '@proj-airi/ui'
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
-import { useI18n } from 'vue-i18n'
+import type * as v from 'valibot'
 
-import * as v from 'valibot'
+import type { entrySchema } from './cohost-status'
+
+import { errorMessageFrom } from '@moeru/std'
+import { Button, FieldInput, Textarea } from '@proj-airi/ui'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import decisions from '../../../../i18n/src/locales/cohost/decisions.json'
 import en from '../../../../i18n/src/locales/cohost/en.json'
 import zh from '../../../../i18n/src/locales/cohost/zh-Hans.json'
 
+import { cohostAccessToken, cohostControlId, cohostNeedsToken } from '../../composables/cohost-media-state'
+import { syncCohostCharacter } from '../../composables/use-cohost-character'
 import { cohostInput } from '../../composables/use-cohost-voice'
+import { useStickersStore } from '../../stores/modules/stickers'
+import { CohostClient } from './cohost-client'
+import { useCohostStatus } from './use-cohost-status'
 
 const props = defineProps<{ stage: 'web' | 'desktop' }>()
-const emit = defineEmits<{ performance: [value: unknown] }>()
+const emit = defineEmits<{ performance: [value: unknown], settings: [] }>()
 const open = defineModel<boolean>('open', { default: true })
-const { t } = useI18n({ useScope: 'local', messages: { en, 'zh-Hans': zh }, fallbackLocale: 'zh-Hans' })
-const entrySchema = v.object({
-  id: v.number(),
-  role: v.string(),
-  text: v.string(),
-  at: v.number(),
-  explanation: v.optional(v.string()),
-  reason: v.optional(v.string()),
-  userId: v.optional(v.string()),
-  displayName: v.optional(v.string()),
-  real: v.optional(v.boolean()),
-  status: v.optional(v.string()),
-  motionLabel: v.optional(v.string()),
-  error: v.optional(v.string()),
-})
-const statusSchema = v.object({
-  live: v.boolean(),
-  deepseekConfigured: v.boolean(),
-  busy: v.boolean(),
-  muted: v.boolean(),
-  hostSpeaking: v.boolean(),
-  bilibili: v.object({
-    source: v.string(),
-    configured: v.boolean(),
-    state: v.string(),
-    error: v.nullable(v.string()),
-    roomId: v.nullable(v.string()),
-    received: v.number(),
-    accepted: v.number(),
-    dropped: v.number(),
-  }),
-  configuration: v.object({ model: v.string(), persona: v.string(), recognition: v.string(), speech: v.string(), voice: v.string() }),
-  room: v.object({ session: v.string(), version: v.number(), entries: v.array(entrySchema) }),
-  performance: v.unknown(),
-  airi: v.object({
-    active: v.boolean(),
-    ready: v.boolean(),
-    configured: v.boolean(),
-    control: v.optional(v.nullable(v.string())),
-    error: v.optional(v.nullable(v.string())),
-    stages: v.array(v.object({ stage: v.string(), ready: v.boolean() })),
-  }),
-})
+const stickers = useStickersStore()
+const { t, locale } = useI18n({ useScope: 'local', messages: { en, 'zh-Hans': zh }, fallbackLocale: 'zh-Hans' })
 type Entry = v.InferOutput<typeof entrySchema>
-const state = ref<v.InferOutput<typeof statusSchema>>()
+const { state, connected } = useCohostStatus()
 const hostText = ref('')
 const viewerText = ref('')
 const role = ref<'host' | 'viewer'>('host')
 const draft = computed({ get: () => role.value === 'host' ? hostText.value : viewerText.value, set: value => role.value === 'host' ? hostText.value = value : viewerText.value = value })
-const token = ref('')
-const needsToken = ref(false)
+const token = cohostAccessToken
+const needsToken = cohostNeedsToken
 const error = ref('')
-const connected = ref(false)
 const sending = ref(false)
+const preparingVoice = ref(false)
+const hostingTopic = ref('')
 const scroll = ref<HTMLElement>()
-const pending = new Set<AbortController>()
-const origin = 'http://127.0.0.1:8787'
-// The panel owns only its microphone lease. The server owns decisions and reply execution.
-// Collapsing preserves the lease. Navigation releases it and cancels panel requests.
-const owner = crypto.randomUUID()
-let timer: ReturnType<typeof setTimeout> | undefined
-let disposed = false
+
+const owner = cohostControlId
 let viewerNumber = 0
 const processReasons = new Set(['host_voice_detected', 'transcript_updated', 'decision_consumed', 'viewer_decision_consumed', 'manual_host_override', 'mode_changed', 'viewer_window_changed'])
 const entries = computed(() => state.value?.room.entries.filter(entry => !processReasons.has(entry.reason ?? '')))
 const ready = computed(() => connected.value && state.value?.deepseekConfigured)
-const ownVoice = computed(() => state.value?.airi.active && state.value.airi.control === owner)
-const canStartVoice = computed(() => ready.value && state.value?.airi.configured && !state.value.airi.active && state.value.airi.stages.some(stage => stage.stage === props.stage && stage.ready))
-const biliActive = computed(() => ['connecting', 'connected', 'retrying'].includes(state.value?.bilibili.state ?? ''))
+const ownVoice = computed(() => state.value?.airi.capture && state.value.airi.control === owner)
+const canStartVoice = computed(() => ready.value && state.value?.airi.configured && (!state.value.airi.active || (state.value.airi.control === owner && !state.value.airi.capture)) && state.value.airi.stages.some(stage => stage.stage === props.stage && stage.owner === owner && stage.ready))
 const voiceLabel = computed(() => {
   const voice = state.value?.airi
   if (!voice?.configured)
     return t('voiceMissing')
-  if (!voice.active)
+  if (!voice.active || !voice.capture)
     return t('voiceIdle')
   if (!ownVoice.value)
     return t('voiceElsewhere')
-  return t(voice.ready ? 'voiceActive' : 'voiceStarting')
+  return t(voice.captureReady ? 'voiceActive' : 'voiceStarting')
 })
 const activity = computed(() => {
   if (!connected.value)
@@ -101,54 +62,16 @@ const activity = computed(() => {
     return t('modelMissing')
   return t(state.value.muted ? 'muted' : state.value.hostSpeaking ? 'speaking' : state.value.busy ? 'busy' : 'waiting')
 })
-function headers() {
-  const value: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token.value)
-    value.Authorization = `Bearer ${token.value}`
-  return value
-}
-async function api(path: string, body?: object): Promise<unknown> {
-  const controller = new AbortController()
-  pending.add(controller)
-  const timeout = setTimeout(() => controller.abort(), 5000)
-  try {
-    const response = await fetch(`${origin}/api/${path}`, { method: body ? 'POST' : 'GET', headers: headers(), body: body ? JSON.stringify(body) : undefined, signal: controller.signal })
-    if (response.status === 401)
-      needsToken.value = true
-    const data: unknown = await response.json()
-    if (!response.ok) {
-      const result = v.safeParse(v.object({ error: v.string() }), data)
-      throw new Error(result.success ? result.output.error : t('offline'))
-    }
-    return data
-  }
-  finally {
-    clearTimeout(timeout)
-    pending.delete(controller)
-  }
-}
-async function refresh() {
-  try {
-    const next = v.parse(statusSchema, await api('status'))
-    if (disposed)
-      return
-    const pinned = !scroll.value || scroll.value.scrollHeight - scroll.value.scrollTop - scroll.value.clientHeight < 70
-    const changed = next.room.session !== state.value?.room.session || next.room.version !== state.value?.room.version
-    state.value = next
-    connected.value = true
-    needsToken.value = false
-    emit('performance', next.performance)
-    if (pinned && changed)
-      await latest()
-  }
-  catch {
-    connected.value = false
-  }
-  finally {
-    if (!disposed)
-      timer = setTimeout(refresh, connected.value ? 400 : 1800)
-  }
-}
+const client = new CohostClient(() => token.value, () => t('requestTimeout'), () => {
+  needsToken.value = true
+})
+const api = (path: string, body?: object) => client.request(path, body)
+watch(() => state.value?.performance, value => emit('performance', value), { immediate: true })
+watch(() => [state.value?.room.session, state.value?.room.version], () => {
+  const pinned = !scroll.value || scroll.value.scrollHeight - scroll.value.scrollTop - scroll.value.clientHeight < 70
+  if (pinned)
+    void latest()
+})
 async function latest() {
   await nextTick()
   if (scroll.value)
@@ -175,7 +98,22 @@ async function send() {
   if (!text || !ready.value)
     return
   await action(async () => {
+    try {
+      await syncCohostCharacter()
+    }
+    catch {
+      throw new Error(t('characterSyncFailed'))
+    }
     await api('live/start', {})
+    if (!state.value?.airi.active) {
+      preparingVoice.value = true
+      try {
+        await api('airi/start', { owner, renderer: owner, stage: props.stage, capture: false })
+      }
+      finally {
+        preparingVoice.value = false
+      }
+    }
     if (speaker === 'host') {
       const utterance = Date.now()
       await api('director/event', { type: 'speech-start', utterance })
@@ -195,16 +133,6 @@ async function send() {
       viewerText.value = ''
   })
 }
-async function toggleBilibili() {
-  await action(async () => {
-    if (biliActive.value) {
-      await api('bilibili/stop', {})
-      return
-    }
-    await api('live/start', {})
-    await api('bilibili/start', {})
-  })
-}
 function message(entry: Entry) {
   if (entry.role === 'director' && entry.reason === 'participation_error' && !entry.explanation)
     return t('decisionError')
@@ -217,26 +145,25 @@ function message(entry: Entry) {
 async function toggleVoice() {
   await action(async () => {
     if (ownVoice.value)
-      return api('airi/stop', { owner })
+      return api('airi/capture', { owner, capture: false })
     await api('live/start', {})
-    return api('airi/start', { owner, stage: props.stage })
+    if (state.value?.airi.active && state.value.airi.control === owner)
+      return api('airi/capture', { owner, capture: true })
+    return api('airi/start', { owner, renderer: owner, stage: props.stage })
   })
 }
-function releaseVoice() {
-  if (state.value?.airi.control === owner)
-    void fetch(`${origin}/api/airi/stop`, { method: 'POST', headers: headers(), body: JSON.stringify({ owner }), keepalive: true }).catch(() => {})
+async function controlHosting(command: 'start' | 'pause' | 'resume' | 'stop') {
+  await action(async () => {
+    if (command === 'start' || command === 'resume') {
+      await syncCohostCharacter()
+      if (!state.value?.airi.active)
+        await api('airi/start', { owner, renderer: owner, stage: props.stage, capture: false })
+    }
+    await api('hosting', { action: command, topic: hostingTopic.value, owner, revision: state.value?.hosting?.revision })
+  })
 }
-onMounted(() => {
-  void refresh()
-  window.addEventListener('pagehide', releaseVoice)
-})
 onUnmounted(() => {
-  disposed = true
-  clearTimeout(timer)
-  for (const controller of pending)
-    controller.abort()
-  releaseVoice()
-  window.removeEventListener('pagehide', releaseVoice)
+  client.dispose()
 })
 </script>
 
@@ -245,25 +172,57 @@ onUnmounted(() => {
     <Button v-if="!open" :aria-label="t('open')" @click="open = true">
       {{ t('open') }} · {{ ownVoice ? t('voiceActive') : t('voiceIdle') }}
     </Button>
-    <div v-show="open" :class="['h-full min-h-0 flex flex-col gap-3 p-4', 'rounded-2xl bg-white/95 dark:bg-neutral-900/95 shadow-lg']">
-      <header :class="['flex items-center justify-between gap-2']">
+    <div v-show="open" :class="['h-full min-h-0 flex flex-col gap-1.5 p-3', 'rounded-2xl bg-white/95 dark:bg-neutral-900/95 shadow-lg']">
+      <header :class="['flex shrink-0 items-center gap-2']">
         <strong>{{ t('title') }}</strong>
-        <Button :aria-label="t('close')" @click="open = false">
+        <Button size="sm" :class="['ml-auto']" @click="emit('settings')">
+          {{ t('liveSettings') }}
+        </Button>
+        <Button size="sm" :aria-label="t('close')" @click="open = false">
           <span :class="['i-solar-alt-arrow-right-linear']" />
         </Button>
       </header>
-      <p role="status" :class="['text-xs text-neutral-500 dark:text-neutral-400']">
-        {{ activity }}
-      </p>
+      <div :class="['flex shrink-0 items-center justify-between gap-2']">
+        <p role="status" :class="['text-xs text-neutral-500 dark:text-neutral-400']">
+          {{ activity }}
+        </p>
+        <Button size="sm" @click="latest">
+          {{ t('latest') }}
+        </Button>
+      </div>
+      <details v-if="state?.hosting" data-cohost-hosting :class="['shrink-0 text-sm']">
+        <summary>{{ t('hostingTitle') }} · {{ t(state.hosting.state === 'off' && state.hosting.automatic ? 'hosting_auto' : `hosting_${state.hosting.state}`) }}</summary>
+        <div :class="['max-h-32 flex flex-col gap-2 overflow-y-auto py-2']">
+          <FieldInput v-if="state.hosting.state === 'off' || state.hosting.state === 'completed'" v-model="hostingTopic" :label="t('hostingTopic')" />
+          <small v-else>
+            {{ state.hosting.topic || t('hostingAutoTopic') }} · {{ state.hosting.continuous ? t('hostingContinuous') : `${state.hosting.steps}/${state.hosting.maxSteps}` }}
+          </small>
+          <small>{{ t(state.hosting.reason ? `hostingReason_${state.hosting.reason}` : 'hostingHint') }}</small>
+          <div :class="['flex flex-wrap gap-2']">
+            <Button v-if="state.hosting.state === 'off' || state.hosting.state === 'completed'" :disabled="sending || !ready || state.busy || state.muted || hostingTopic.length > 200" @click="controlHosting('start')">
+              {{ t('hostingStart') }}
+            </Button>
+            <Button v-else-if="state.hosting.state === 'running' || state.hosting.state === 'observing'" :disabled="sending" @click="controlHosting('pause')">
+              {{ t('hostingPause') }}
+            </Button>
+            <Button v-else :disabled="sending || !ready || state.busy || state.muted" @click="controlHosting('resume')">
+              {{ t('hostingResume') }}
+            </Button>
+            <Button v-if="state.hosting.state !== 'off'" :disabled="sending" @click="controlHosting('stop')">
+              {{ t('hostingStop') }}
+            </Button>
+          </div>
+        </div>
+      </details>
       <div v-if="needsToken" :class="['flex flex-col gap-2']">
         <FieldInput v-model="token" type="password" :label="t('token')" />
         <small>{{ t('connect') }}: {{ t('token') }}</small>
       </div>
-      <div ref="scroll" role="log" :aria-label="t('title')" :class="['min-h-20 flex-1 overflow-y-auto overscroll-contain pr-1']">
+      <div ref="scroll" role="log" :aria-label="t('title')" :class="['min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1', 'border-y border-neutral-200/60 dark:border-neutral-700/60']">
         <p v-if="!entries?.length" :class="['py-8 text-sm text-neutral-500']">
           {{ t('empty') }}
         </p>
-        <article v-for="entry in entries" :key="`${state?.room.session}:${entry.id}`" :data-role="entry.role" :class="['my-3 flex flex-col gap-1', entry.role === 'host' ? 'items-end' : 'items-start']">
+        <article v-for="entry in entries" :key="`${state?.room.session}:${entry.id}`" v-memo="[entry, locale, stickers.artwork]" :data-role="entry.role" :class="['my-3 flex flex-col gap-1', entry.role === 'host' ? 'items-end' : 'items-start']">
           <div :class="['flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400']">
             <strong>{{ entry.role === 'host' ? t('host') : entry.role === 'viewer' ? (entry.displayName || entry.userId) : t('cohost') }}</strong>
             <span v-if="entry.role === 'viewer'">{{ entry.real ? t('biliViewer') : t('simulatedViewer') }}</span>
@@ -273,77 +232,57 @@ onUnmounted(() => {
           <p :class="['max-w-full whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm', entry.role === 'host' ? 'bg-primary-100 dark:bg-primary-900' : entry.role === 'director' ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300' : 'bg-primary-50 dark:bg-neutral-800']">
             {{ message(entry) }}
           </p>
-          <small v-if="entry.motionLabel || entry.status === 'cancelled' || entry.status === 'failed'" :class="['text-xs text-neutral-500']">{{ entry.motionLabel }} {{ entry.status === 'cancelled' ? t('cancelled') : entry.status === 'failed' ? t('failed') : '' }}</small>
+          <img v-if="entry.sticker && stickers.artwork[entry.sticker.id]" :src="stickers.artwork[entry.sticker.id]" :alt="entry.sticker.description" :class="['h-32 w-32 object-contain']">
+          <small v-else-if="entry.sticker" :class="['text-xs text-neutral-500']">{{ t('stickerUnavailable') }}</small>
+          <small v-if="entry.motionLabel || entry.status === 'cancelled' || entry.status === 'failed'" :class="['text-xs text-neutral-500']">{{ entry.motionLabel }} {{ entry.status === 'cancelled' ? t('cancelled') : entry.status === 'failed' ? t(entry.errorCode === 'speech_playback_failed' ? 'speechFailed' : 'failed') : '' }}</small>
         </article>
       </div>
-      <Button :class="['self-end text-xs']" @click="latest">
-        {{ t('latest') }}
-      </Button>
-      <div :class="['flex flex-wrap gap-2']">
-        <Button :disabled="sending || (!ownVoice && !canStartVoice)" @click="toggleVoice">
+      <div :class="['flex shrink-0 flex-wrap gap-2']">
+        <Button size="sm" :disabled="sending || (!ownVoice && !canStartVoice)" @click="toggleVoice">
           {{ ownVoice ? t('stop') : t('start') }}
         </Button>
-        <Button color="orange" :disabled="!connected" @click="action(() => api('interrupt', {}), false)">
+        <Button size="sm" color="orange" :disabled="!connected" @click="action(() => api('interrupt', {}), false)">
           {{ t('interrupt') }}
         </Button>
-        <Button :disabled="!connected" @click="action(() => api('mute', { value: !state?.muted }))">
+        <Button size="sm" :disabled="!connected" @click="action(() => api('mute', { value: !state?.muted }))">
           {{ state?.muted ? t('resume') : t('pause') }}
         </Button>
       </div>
-      <small :class="['text-xs text-neutral-500']">{{ voiceLabel }}</small>
-      <div v-if="ownVoice" data-cohost-input :class="['flex flex-col gap-1 text-xs text-neutral-500 dark:text-neutral-400']">
+      <small :class="['shrink-0 text-xs text-neutral-500 dark:text-neutral-400']">{{ voiceLabel }}</small>
+      <div v-if="ownVoice" data-cohost-input :class="['max-h-20 flex shrink-0 flex-col gap-1 overflow-y-auto text-xs text-neutral-500 dark:text-neutral-400']">
         <div role="meter" :aria-label="t('inputVolume')" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="Math.round(cohostInput.level * 100)" :class="['h-1.5 overflow-hidden rounded bg-neutral-200 dark:bg-neutral-700']">
           <div :class="['h-full rounded bg-primary-400 transition-width duration-150']" :style="{ width: `${cohostInput.level * 100}%` }" />
         </div>
         <span>{{ t(`input_${cohostInput.phase}`) }}</span>
+        <span v-if="cohostInput.partial" data-cohost-partial>{{ t('recognitionPartial') }}: {{ cohostInput.partial }}</span>
         <span v-if="cohostInput.issue" :class="['text-orange-600 dark:text-orange-300']">{{ t(`inputIssue_${cohostInput.issue}`) }}</span>
         <span v-else-if="cohostInput.quiet">{{ t('inputQuiet') }}</span>
       </div>
-      <div :class="['flex gap-2']" role="group" :aria-label="t('host')">
-        <Button :variant="role === 'host' ? 'primary' : 'secondary'" @click="role = 'host'">
+      <div :class="['shrink-0']" @keydown.ctrl.enter.prevent="send" @keydown.meta.enter.prevent="send">
+        <Textarea v-model="draft" :aria-label="t(role)" :placeholder="t('placeholder')" :submit-on-enter="false" default-height="56px" :class="['max-h-24 resize-none']" />
+      </div>
+      <div :class="['flex shrink-0 items-center gap-2']" role="group" :aria-label="t('host')">
+        <Button size="sm" :aria-pressed="role === 'host'" :variant="role === 'host' ? 'primary' : 'secondary'" @click="role = 'host'">
           {{ t('host') }}
         </Button>
-        <Button :variant="role === 'viewer' ? 'primary' : 'secondary'" @click="role = 'viewer'">
+        <Button size="sm" :aria-pressed="role === 'viewer'" :variant="role === 'viewer' ? 'primary' : 'secondary'" @click="role = 'viewer'">
           {{ t('viewer') }}
         </Button>
+        <Button size="sm" :class="['ml-auto']" color="primary" variant="primary" :disabled="sending || !ready || !draft.trim() || draft.length > (role === 'host' ? 2000 : 500)" @click="send">
+          {{ t(preparingVoice ? 'preparingVoice' : sending ? 'sending' : 'send') }}
+        </Button>
       </div>
-      <div @keydown.ctrl.enter.prevent="send" @keydown.meta.enter.prevent="send">
-        <FieldTextArea v-model="draft" :label="t(role)" :placeholder="t('placeholder')" :rows="2" :required="false" textarea-class="resize-none max-h-30" />
-      </div>
-      <Button color="primary" variant="primary" :disabled="sending || !ready || !draft.trim() || draft.length > (role === 'host' ? 2000 : 500)" @click="send">
-        {{ t('send') }}
-      </Button>
-      <p v-if="error || state?.airi.error" role="alert" :class="['text-xs text-orange-600 dark:text-orange-300']">
+      <p v-if="error || state?.airi.error" role="alert" :class="['max-h-16 shrink-0 overflow-y-auto text-xs text-orange-600 dark:text-orange-300']">
         {{ error || state?.airi.error }}
       </p>
-      <details :class="['max-h-36 shrink-0 overflow-auto text-xs text-neutral-500 dark:text-neutral-400']">
-        <summary :class="['cursor-pointer']">
-          {{ t('settings') }}
-        </summary>
-        <p>{{ t('model') }}: {{ state?.configuration.model }} · {{ t('persona') }}: {{ state?.configuration.persona }}</p>
-        <p>{{ t('configVoice') }}: {{ state?.configuration.recognition }} / {{ state?.configuration.speech }} · {{ state?.configuration.voice }}</p>
-        <p>{{ t('configDevice', { device: cohostInput.device || t('systemMicrophone') }) }} · {{ t('voiceTip') }}</p>
-        <p>{{ t('configNote') }}</p>
-        <p>{{ t('tip') }}</p>
-        <div data-bilibili :class="['mt-2 flex flex-col gap-2']">
-          <strong>{{ t('biliTitle') }} · {{ t(`bili_${state?.bilibili.state ?? 'disconnected'}`) }}</strong>
-          <span v-if="state?.bilibili.source === 'blivechat'">{{ t('biliLocalRelay') }}</span>
-          <span v-if="!state?.bilibili.configured">{{ t('biliMissing') }}</span>
-          <a v-if="!state?.bilibili.configured" href="http://127.0.0.1:8791/" target="_blank" rel="noopener noreferrer">{{ t('biliSetup') }}</a>
-          <span v-if="state?.bilibili.error">{{ t(`biliError_${state.bilibili.error}`) }}</span>
-          <span v-if="state?.bilibili.roomId">{{ t('biliRoom', { room: state.bilibili.roomId }) }}</span>
-          <span>{{ t('biliCount', { accepted: state?.bilibili.accepted ?? 0, dropped: state?.bilibili.dropped ?? 0 }) }}</span>
-          <Button :disabled="sending || !connected || (!biliActive && !state?.bilibili.configured)" @click="toggleBilibili">
-            {{ biliActive ? t('biliStop') : t('biliStart') }}
-          </Button>
-        </div>
-      </details>
+      <p :title="`${state?.configuration.model} · ${state?.configuration.speech}`" :class="['shrink-0 truncate text-xs text-neutral-500 dark:text-neutral-400']">
+        {{ state?.configuration.model }} · {{ state?.configuration.speech }}
+      </p>
     </div>
   </aside>
 </template>
 
 <style scoped>
-.cohost-panel { position: absolute; right: 12px; top: 12px; bottom: 12px; width: min(400px, calc(100% - 24px)); z-index: 70; -webkit-app-region: no-drag; }
+.cohost-panel { position: absolute; right: 12px; top: 12px; bottom: 12px; width: min(480px, calc(100% - 24px)); z-index: 70; -webkit-app-region: no-drag; }
 .cohost-panel[data-open='false'] { bottom: auto; width: auto; }
-@media (max-height: 650px) { .cohost-panel[data-open='true'] { overflow: auto; } .cohost-panel > div { min-height: 600px; } }
 </style>

@@ -1,0 +1,7 @@
+# Additional isolated packages; torch/audio/scientific libraries are read-only
+# imports from the already installed Index environment. No full Gradio demo.
+qwen-tts==0.1.1
+transformers==4.57.3
+accelerate==1.12.0
+tokenizers==0.22.2
+sox==1.5.0

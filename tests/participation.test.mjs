@@ -1,3 +1,5 @@
+import {testCapabilities} from './fixtures/performance.mjs'
+import {constrainPerformance} from '../packages/cohost-contracts/performance.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {once} from 'node:events'
@@ -34,14 +36,42 @@ test('planner validates one tool call and never accepts ordinary content or hidd
  assert.equal(body.model,'shared-model');assert.equal(body.thinking.type,'disabled');assert.equal(body.tool_choice.function.name,'participate')
  await assert.rejects(()=>planParticipation({}, {signal:new AbortController().signal,apiKey:'test-only',fetchImpl:async()=>new Response('sensitive',{status:401})}),/Participation request failed/)
 })
-test('clear handover bypasses planning; natural reply is prepared and consumed exactly once',async t=>{
- let calls=0;const f=fixture(t,async()=>{calls++;return action()})
- f.host('助播，你觉得怎么样？');await f.p.run();assert.equal(calls,0)
+test('explicit handover and natural replies both use one unified generation and consume exactly once',async t=>{
+ let calls=0;const f=fixture(t,async()=>{calls++;return action('reply_host',{hostIntent:'invited'})})
+ f.host('助播，你觉得怎么样？');await f.p.run();assert.equal(calls,1)
  const fast=f.director.consume(f.director.candidate.id);f.scheduler.finish(fast)
  f.host('你说它是不是把跑步机当成猫窝了？');await f.p.run()
  const id=f.director.candidate.id,turn=f.director.consume(id)
- assert.equal(turn.preparedReply,action().text);assert.equal(calls,1);assert.equal(f.director.consume(id),null)
+ assert.equal(turn.preparedReply,action().text);assert.equal(calls,2);assert.equal(f.director.consume(id),null)
 })
+
+test('host stop combinations bypass paid planning even when idle and do not invite a confirmation reply',async t=>{
+ let calls=0;const f=fixture(t,async()=>{calls++;return action('reply_host',{hostIntent:'invited'})})
+ const turn=f.scheduler.beginHost('长回答')
+ f.host('停停停，等一下，先打住。');await f.p.run()
+ assert.equal(turn.controller.signal.aborted,true);assert.equal(calls,0);assert.equal(f.director.candidate,null)
+ f.host('打住，打住，打住。');await f.p.run()
+ assert.equal(calls,0);assert.equal(f.director.intent,'stop')
+ f.scheduler.enqueue({id:'new',platform:'manual',userId:'viewer',text:'继续说呀',mentioned:true})
+ await f.p.run();assert.equal(calls,0)
+ f.host('现在可以回答了，你觉得今天怎么样？');await f.p.run()
+ assert.equal(calls,1);assert.ok(f.director.candidate)
+})
+test('only an actual information lookup extends the reply window; new speech still cancels it',async t=>{
+  for(const change of ['none','speech','mute']) {
+    let clock=1000,finish,started
+    const f=fixture(t,(_snapshot,options)=>{options.onLookup();started=options.signal;return new Promise(resolve=>{finish=resolve})},{now:()=>clock})
+    f.director.now=()=>clock;f.scheduler.now=()=>clock
+    f.host('帮我查一下冥王星现在是什么分类');const pending=f.p.run()
+    clock+=8000
+    if(change==='speech'){f.director.event({type:'speech-start',utterance:2});f.p.invalidate()}
+    if(change==='mute'){f.scheduler.setMuted(true);f.p.invalidate()}
+    finish(action('reply_host',{hostIntent:'invited'}));await pending
+    if(change==='none')assert.ok(f.director.candidate)
+    else {assert.equal(f.director.candidate,null);assert.equal(started.aborted,true)}
+  }
+})
+
 test('late decisions cannot survive new speech, mute or a disabled planner',async t=>{
  for(const change of ['speech','mute','disable']){
   let finish;const f=fixture(t,()=>new Promise(resolve=>{finish=resolve}));f.host('你说呢？');const work=f.p.run()
@@ -56,6 +86,36 @@ test('waiting is a visible decision without recurring paid polling; timeout does
  await f.p.run();await f.p.run();assert.equal(calls,1);assert.equal(f.director.trace.at(-1).reason,'participation_wait')
  const slow=fixture(t,()=>new Promise(()=>{}),{timeoutMs:15});slow.host('你说呢？');await slow.p.run()
  assert.equal(slow.director.candidate,null);assert.equal(slow.director.trace.at(-1).reason,'participation_timeout');assert.equal(slow.p.status().busy,false)
+})
+
+test('cancelled planner releases immediately, new speech proceeds, and a late reply stream is closed',async t=>{
+ let finish,closed=0,calls=0
+ const f=fixture(t,()=>++calls===1?new Promise(resolve=>{finish=resolve}):Promise.resolve(action()))
+ f.host('你说呢？');const old=f.p.run();f.p.invalidate();await old
+ assert.equal(f.p.status().busy,false);assert.equal(f.p.tasks.status().draining,1)
+ f.host('这件事该怎么理解？');await f.p.run();const candidate=f.director.candidate
+ assert.ok(candidate);assert.equal(calls,2)
+ finish(action('reply_host',{replyStream:{close(){closed++}}}));await delay(0)
+ assert.equal(closed,1);assert.equal(f.director.candidate,candidate)
+ assert.equal(f.p.tasks.status().draining,0)
+})
+
+test('planner timeout discards a late stream without changing the visible decision',async t=>{
+ let finish,closed=0
+ const f=fixture(t,()=>new Promise(resolve=>{finish=resolve}),{timeoutMs:10})
+ f.host('你说呢？');await f.p.run();const count=f.director.trace.length
+ finish(action('reply_host',{replyStream:{close(){closed++}}}));await delay(0)
+ assert.equal(closed,1);assert.equal(f.director.trace.length,count);assert.equal(f.director.candidate,null)
+})
+
+test('a successful reply stream transfers to the candidate and survives completed task cleanup',async t=>{
+ let closed=0,signal
+ const stream={close(){closed++}}
+ const f=fixture(t,async(_,options)=>{signal=options.signal;return action('reply_host',{replyStream:stream})})
+ f.host('你说呢？');await f.p.run();await delay(0)
+ assert.equal(f.director.candidate.replyStream,stream);assert.equal(closed,0);assert.equal(signal.aborted,false)
+ f.p.invalidate();assert.equal(signal.aborted,false,'the completed review no longer owns the stream')
+ f.director.reset('new-topic');assert.equal(closed,1)
 })
 test('semantic viewer selection can choose relevant second item but cannot bypass eligibility or expiration',async t=>{
  const f=fixture(t,async()=>action('reply_viewer',{targetId:'relevant',platform:'manual'}))
@@ -78,23 +138,92 @@ test('semantic takeover stops an active turn, but audience-only snapshots cannot
  const active=f.scheduler.beginHost('另一个回答');f.director.consumedUtterance=f.director.utterance.id
  f.p.apply(action('stop'),{hostOpportunity:false},1);assert.equal(active.controller.signal.aborted,false)
 })
+
+test('ordinary wait preserves playback; a takeover decision cannot cancel a newer output',async t=>{
+ const f=fixture(t,async()=>action('wait',{reason:'只是附和，继续听当前回答。'}))
+ const playing=f.scheduler.beginHost('继续说故事')
+ f.host('这倒也是，继续说就好。');await f.p.run()
+ assert.equal(playing.controller.signal.aborted,false)
+ let finish
+ f.p.plan=()=>new Promise(resolve=>{finish=resolve})
+ f.host('我想先把这个故事的后半段讲完，你先听着。')
+ const pending=f.p.run()
+ f.scheduler.finish(playing)
+ const newer=f.scheduler.beginHost('人工开始的新一轮')
+ finish(action('wait',{yieldToHost:true}));await pending
+ assert.equal(newer.controller.signal.aborted,false)
+ assert.notEqual(f.director.intent,'stop')
+})
+
+test('yielding wait stops only for current host authority, never a viewer or unconfirmed input',async t=>{
+ const f=fixture(t)
+ let playing=f.scheduler.beginHost('上一轮')
+ f.p.apply(action('wait',{yieldToHost:true}),{active:true,activeTurn:playing.id,hostOpportunity:false},1)
+ assert.equal(playing.controller.signal.aborted,false)
+ f.director.event({type:'speech-start',utterance:1})
+ f.director.event({type:'transcript',utterance:1,text:'先听我把故事讲完',final:false})
+ f.p.apply(action('wait',{yieldToHost:true}),{active:true,activeTurn:playing.id,hostOpportunity:true,latestHost:{id:1}},1)
+ assert.equal(playing.controller.signal.aborted,false)
+ f.director.event({type:'transcript',utterance:1,text:'先听我把故事讲完，后面还有反转。',final:true})
+ f.director.event({type:'speech-end',utterance:1})
+ f.p.apply(action('wait',{yieldToHost:true}),f.p.context(),1)
+ assert.equal(playing.controller.signal.aborted,true)
+ assert.equal(f.p.lastDecision.action,'stop')
+ assert.equal(f.director.intent,'stop')
+})
+
+test('yield-to-host is a typed instruction rather than prose, and cannot accompany a spoken reply',()=>{
+ const parse=extra=>parseParticipation({tool_calls:[{function:{name:'participate',arguments:JSON.stringify(action('wait',extra))}}]})
+ assert.equal(parse({yieldToHost:true}).yieldToHost,true)
+ assert.equal(parse({yieldToHost:false}).yieldToHost,false)
+ assert.throws(()=>parse({yieldToHost:'true'}))
+ assert.throws(()=>parse({yieldToHost:true,action:'reply_host',text:'好的，我接着说'}))
+})
+
+test('a yielding wait while idle remains a normal wait and consumes the observation',async t=>{
+ let calls=0
+ const f=fixture(t,async()=>{calls++;return action('wait',{yieldToHost:true,reason:'先听完后半段。'})})
+ f.host('这个故事的后半段还没讲，先别猜答案。')
+ await f.p.run();await f.p.run()
+ assert.equal(f.director.trace.at(-1).reason,'participation_wait')
+ assert.equal(f.p.lastDecision.action,'wait')
+ assert.equal(calls,1)
+ assert.equal(f.director.candidate,null)
+})
+
+test('a semantic takeover still holds the floor if observed playback finishes during planning',async t=>{
+ let finish
+ const f=fixture(t,()=>new Promise(resolve=>{finish=resolve}))
+ const playing=f.scheduler.beginHost('旧故事')
+ f.host('我还有一段没讲，先让我把前因后果补充完。')
+ const pending=f.p.run();f.scheduler.finish(playing)
+ finish(action('stop'));await pending
+ assert.equal(f.director.intent,'stop')
+ assert.equal(f.director.candidate,null)
+})
 test('HTTP flow supplies unheard context and prepared answer uses no second model call',async t=>{
  let replyCalls=0,plannerCalls=0,snapshot
- const server=createApp({apiKey:'test-only',token:'',semanticEnabled:true,participationOptions:{debounceMs:1},planner:async value=>{plannerCalls++;snapshot=value;return action()},reply:async function*({scene}){replyCalls++;assert.ok(scene.some(x=>x.text.includes('年糕')));yield '年糕'}})
+ const server=createApp({apiKey:'test-only',token:'',semanticEnabled:true,participationOptions:{debounceMs:1},planner:async value=>{plannerCalls++;snapshot=value;return action('reply_host',{hostIntent:'invited',stickerId:'airi-happy'})},reply:async function*({scene}){replyCalls++;assert.ok(scene.some(x=>x.text.includes('年糕')));yield '年糕'}})
  server.listen(0,'127.0.0.1');await once(server,'listening');t.after(async()=>{server.closeAllConnections();await new Promise(r=>server.close(r))})
  const base='http://127.0.0.1:'+server.address().port
  const post=async(path,body)=>fetch(base+'/api/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
  const status=async()=> (await fetch(base+'/api/status')).json()
  async function host(id,text){for(const e of [{type:'speech-start'},{type:'transcript',text,final:true},{type:'speech-end'}])await post('director/event',{...e,utterance:id})}
+ assert.equal((await post('stickers',{stage:'desktop',owner:'desktop-owner',enabled:true,frequency:100,entries:[{id:'airi-happy',description:'开心'}]})).status,200)
  await host(1,'猫叫年糕，先听我讲完。');assert.equal(plannerCalls,0)
  await post('director/event',{type:'mode',value:'auto'});await host(2,'你说它是不是把跑步机当猫窝了？')
  let state;for(let n=0;n<100;n++){state=await status();if(state.director.candidate)break;await delay(10)}
  assert.ok(snapshot.scene.some(x=>x.text.includes('年糕')))
+ assert.equal(snapshot.stickers[0].id,'airi-happy')
  const response=await post('reply',{source:'director',decision:state.director.candidate.id,engine:'deepseek'})
  assert.ok((await response.text()).includes('年糕'));assert.equal(replyCalls,0);assert.equal(plannerCalls,1)
+ const delivered=(await status()).room.entries.findLast(x=>x.role==='assistant')
+ assert.equal(delivered.sticker.id,'airi-happy');assert.equal(delivered.text.includes('airi-happy'),false)
  assert.equal((await post('reply',{source:'director',decision:state.director.candidate.id,engine:'deepseek'})).status,409)
- await host(3,'助播，你觉得那只猫叫什么？');state=await status();await (await post('reply',{source:'director',decision:state.director.candidate.id,engine:'deepseek'})).text()
- assert.equal(replyCalls,1);assert.equal(plannerCalls,1)
+ await host(3,'助播，你觉得那只猫叫什么？')
+ for(let n=0;n<100;n++){state=await status();if(state.director.candidate)break;await delay(10)}
+ await (await post('reply',{source:'director',decision:state.director.candidate.id,engine:'deepseek'})).text()
+ assert.equal(replyCalls,0);assert.equal(plannerCalls,2)
  await post('reset',{});assert.equal((await status()).room.entries.some(x=>x.text.includes('年糕')),false)
 })
 
@@ -106,7 +235,7 @@ test('invited summary bypasses proactive cooldown without a question mark',async
 test('waiting marks host observed, does not poll again, and new eligible viewer remains actionable',async t=>{
  let calls=0;const f=fixture(t,async()=>{calls++;return action('wait')})
  f.director.event({type:'viewer-window',value:true});f.scheduler.enqueue({id:'first',platform:'manual',userId:'a',text:'偏题',mentioned:true})
- f.host('先听我讲完。');await f.p.run();await f.p.run();assert.equal(calls,1)
+ f.host('这件事还有后续，我先把故事讲完。');await f.p.run();await f.p.run();assert.equal(calls,1)
  assert.equal(f.p.context().hostOpportunity,false)
  f.scheduler.enqueue({id:'second',platform:'manual',userId:'b',text:'相关提问',mentioned:true});f.scene.add('viewer','相关提问')
  await f.p.run();assert.equal(calls,2);assert.equal(f.p.context().hostOpportunity,false)
@@ -127,7 +256,10 @@ test('invalid optional actions preserve speech; misplaced components use full sa
  const repaired=parse(action('reply_host',{motion,components:{peace:1,tailBase:.35,tailMid:-.3,tailTip:.4}}))
  assert.equal(repaired.motion.frames[0].components.peace,1);assert.equal(repaired.motion.frames[0].components.tailMid,-.3)
  assert.deepEqual(repaired.warnings,['components_relocated']);assert.equal(repaired.motion.frames[1].components,undefined)
- for(const components of [{peace:2},{arbitrary:1}])assert.equal(parse(action('reply_host',{motion,components})).motion,undefined)
+ assert.equal(parse(action('reply_host',{motion,components:{peace:2}})).motion,undefined)
+ const unknown=parse(action('reply_host',{motion,components:{arbitrary:1}}))
+ const constrained=constrainPerformance(unknown,testCapabilities())
+ assert.equal(constrained.motion.frames[0].components,undefined);assert.ok(constrained.issues.includes('component:arbitrary'))
  for(const motion of [null,[],{label:'坏结构',frames:{0:{pose:{}}}}]) {
   const result=parse(action('reply_host',{motion,components:{peace:1}}));assert.equal(result.text,action().text);assert.equal(result.motion,undefined)
  }

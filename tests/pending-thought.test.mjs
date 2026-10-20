@@ -111,10 +111,10 @@ test('expired intention cannot be consumed through an otherwise current prepared
  const id=f.director.candidate.id;f.advance(60);assert.equal(f.director.consume(id),null)
 })
 
-test('fast handover carries the same note without a planning call, then retires it only on delivery',async t=>{
+test('explicit handover carries the same note into unified generation without a separate reply call',async t=>{
  let plannerCalls=0,contexts=[]
  const server=createApp({apiKey:'test-only',token:'',semanticEnabled:true,rehearsal:true,participationOptions:{debounceMs:1},
-  planner:async()=>{plannerCalls++;return action('wait',{thought})},reply:async function*(args){contexts.push(args);yield '年糕是跑步机的房东。'}})
+  planner:async args=>{plannerCalls++;contexts.push(args);return plannerCalls===1?action('wait',{thought}):action('reply_host',{hostIntent:'invited',text:'年糕是跑步机的房东。'})},reply:async function*(){assert.fail('must reuse prepared reply')}})
  server.listen(0,'127.0.0.1');await once(server,'listening');t.after(async()=>{server.closeAllConnections();await new Promise(r=>server.close(r))})
  const base='http://127.0.0.1:'+server.address().port
  const post=(path,body)=>fetch(base+'/api/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
@@ -124,9 +124,11 @@ test('fast handover carries the same note without a planning call, then retires 
  for(let n=0;n<100&&!(await status()).participation.pendingThought;n++)await delay(10)
  assert.equal(plannerCalls,1)
  await host(2,'小鲸鱼，你觉得年糕是不是房东？')
- let state=await status();assert.ok(state.director.candidate)
+ let state
+ for(let n=0;n<100;n++){state=await status();if(state.director.candidate)break;await delay(10)}
+ assert.ok(state.director.candidate)
  await (await post('reply',{source:'director',decision:state.director.candidate.id,engine:'deepseek'})).text()
- assert.equal(contexts[0].pendingThought.text,thought.text);assert.equal(plannerCalls,1)
+ assert.equal(contexts[1].pendingThought.text,thought.text);assert.equal(plannerCalls,2)
  assert.equal((await status()).participation.pendingThought,null)
  for(const [path,body] of [['interrupt',{}],['mute',{value:true}],['reset',{}]]) {
   await post(path,body);state=await status();assert.equal(state.participation.pendingThought,null)

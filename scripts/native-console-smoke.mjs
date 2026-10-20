@@ -71,9 +71,8 @@ try {
   assert.equal(await panel(page).getByRole('textbox').inputValue(),'主播未发送的草稿')
   result.checks.push('host/viewer drafts and shared simulated comment')
   for(const target of pages){
-    await panel(target).locator('summary').click()
     await panel(target).getByText(/test-cohost-model/).waitFor()
-    await panel(target).locator('summary').click()
+    await button(target,/^(直播助播|Live cohost)$/).waitFor()
     assert.equal(await panel(target).getByRole('combobox').count(),0)
   }
   result.checks.push('effective settings visible with no director/engine selectors')

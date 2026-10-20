@@ -1,100 +1,142 @@
-import type { useExpressionStore } from '@proj-airi/stage-ui-live2d/stores/expression-store'
+import type { ExpressionGroupDefinition, useExpressionStore } from '@proj-airi/stage-ui-live2d/stores/expression-store'
 
 import type { SequenceExpression } from './motion-sequence'
-import type { Components, NativeExpression } from './whale-rig'
+import type { Components, NativeExpression } from './whale-rig.ts'
 
+import { poseParameters } from './pose-control.ts'
 // The Node regression tests and AIRI use the same controller contract.
-import { componentBindings, expressionAliases, faceExpressions, glassesExpressions, handAxes, handExpressions, isWhaleRig, nativeExpressions, stickerExpressions } from './whale-rig.ts'
+import { componentBindings, componentFamilies, expressionAliases, expressionFamilies, handAxes, handExpressions, isWhaleRig, nativeExpressions } from './whale-rig.ts'
 
-type Store = Pick<ReturnType<typeof useExpressionStore>, 'modelId' | 'expressions' | 'expressionGroups' | 'set'>
+type Store = Pick<ReturnType<typeof useExpressionStore>, 'modelId' | 'expressions' | 'expressionGroups' | 'setTransientValue' | 'getEditRevision' | 'llmMode' | 'isExposedToLlm' | 'clearTransient'>
 /** A transient rig lease. Restore only unchanged writes; operator edits win until the lease ends. */
 export class RigController {
   private model = ''
   private entries: Store['expressions'] | undefined
-  private writes = new Map<string, { previous: number, written: number }>()
+  private writes = new Map<string, { previous: number, written: number, revision: number }>()
   private blocked = new Set<string>()
+  private revisions = new Map<string, number>()
+  private groups: Set<string>[] = []
 
   private store: Store
 
   constructor(store: Store) { this.store = store }
 
+  get manuallyControlled() { return this.blocked.size > 0 }
+
   restore() {
     if (this.model === this.store.modelId && this.entries === this.store.expressions) {
       for (const [id, value] of this.writes) {
-        if (this.store.expressions.get(id)?.currentValue === value.written)
-          this.store.set(id, value.previous)
+        if (this.store.expressions.get(id)?.currentValue === value.written && this.store.getEditRevision(id) === value.revision)
+          this.store.setTransientValue(id, value.previous, value.previous)
+        this.store.clearTransient(id)
       }
     }
     this.writes.clear()
     this.blocked.clear()
+    this.revisions.clear()
+    this.groups = []
     this.entries = undefined
   }
 
-  apply(expression: SequenceExpression | undefined, components: Components): string {
+  /** Authored expressions and manual edits outrank procedural pose axes for the same parameters. */
+  permitsPose(axis: keyof typeof poseParameters) {
+    return poseParameters[axis].every(id => !this.writes.has(id) && !this.blocked.has(id))
+  }
+
+  apply(input: SequenceExpression | SequenceExpression[] | undefined, components: Components, weight = 1): string {
     if (this.model !== this.store.modelId || this.entries !== this.store.expressions) {
       this.restore()
       this.model = this.store.modelId
       this.entries = this.store.expressions
+      this.revisions = new Map([...this.entries.keys()].map(id => [id, this.store.getEditRevision(id)]))
+      this.groups = expressionFamilies.map(family => new Set(family.flatMap(name => this.store.expressionGroups.get(name)?.parameters.map(parameter => parameter.parameterId) ?? [])))
+      this.groups.push(...componentFamilies.map(family => new Set(family.axes.map(axis => componentBindings[axis].id))), new Set(['tailBase', 'tailMid', 'tailTip'].map(axis => componentBindings[axis as keyof Components].id)))
     }
     if (!isWhaleRig(this.store.expressionGroups))
       return ''
     const targets = new Map<string, number>()
-    const name = expression && (Object.hasOwn(expressionAliases, expression.name) ? expressionAliases[expression.name as keyof typeof expressionAliases] : expression.name)
-    const group = name && nativeExpressions.includes(name as NativeExpression) ? this.store.expressionGroups.get(name) : undefined
-    if (group && expression && expression.strength > 0) {
-      // Clear competing drawings for this family, without clearing unrelated accessories.
-      for (const family of [faceExpressions, handExpressions, glassesExpressions, stickerExpressions]) {
-        if (!family.includes(group.name))
-          continue
-        for (const member of family) {
-          for (const parameter of this.store.expressionGroups.get(member)?.parameters ?? []) {
-            if (parameter.parameterId === 'ParamMouthOpenY')
-              continue
-            const entry = this.store.expressions.get(parameter.parameterId)
-            if (entry)
-              targets.set(parameter.parameterId, entry.blend === 'Overwrite' ? entry.modelDefault : entry.blend === 'Multiply' ? 1 : 0)
+    const expressions = Array.isArray(input) ? input : input ? [input] : []
+    const activeGroups: ExpressionGroupDefinition[] = []
+    for (const expression of expressions) {
+      const name = expression && (Object.hasOwn(expressionAliases, expression.name) ? expressionAliases[expression.name as keyof typeof expressionAliases] : expression.name)
+      const group = name && this.store.isExposedToLlm(name) && nativeExpressions.includes(name as NativeExpression) ? this.store.expressionGroups.get(name) : undefined
+      if (group && expression && expression.strength > 0) {
+        // Clear competing drawings for this family, without clearing unrelated accessories.
+        activeGroups.push(group)
+        for (const family of expressionFamilies) {
+          if (!family.includes(group.name))
+            continue
+          for (const member of family) {
+            for (const parameter of this.store.expressionGroups.get(member)?.parameters ?? []) {
+              if (parameter.parameterId === 'ParamMouthOpenY')
+                continue
+              const entry = this.store.expressions.get(parameter.parameterId)
+              if (entry)
+                targets.set(parameter.parameterId, entry.blend === 'Overwrite' ? entry.modelDefault : entry.blend === 'Multiply' ? 1 : 0)
+            }
           }
         }
-      }
-      if (handExpressions.includes(group.name)) {
-        for (const axis of handAxes)
-          this.targetComponent(targets, axis, 0)
-      }
-      for (const parameter of group.parameters) {
-        const id = parameter.parameterId
-        if (id === 'ParamMouthOpenY')
-          continue
-        const entry = this.store.expressions.get(id)
-        if (!entry)
-          continue
-        // Authored eyelid values switch with the replacement drawing, preventing double eyes.
-        const smooth = /^(?:ParamBrow|ParamMouthForm)/.test(id)
-        const previous = this.writes.get(id)?.previous ?? entry.currentValue
-        targets.set(id, smooth ? previous + (parameter.value - previous) * expression.strength : parameter.value)
+        if (handExpressions.includes(group.name)) {
+          for (const axis of handAxes)
+            this.targetComponent(targets, axis, 0)
+        }
+        for (const parameter of group.parameters) {
+          const id = parameter.parameterId
+          if (id === 'ParamMouthOpenY')
+            continue
+          const entry = this.store.expressions.get(id)
+          if (!entry)
+            continue
+          // Authored eyelid values switch with the replacement drawing, preventing double eyes.
+          const smooth = /^(?:ParamBrow|ParamMouthForm)/.test(id)
+          const previous = this.writes.get(id)?.previous ?? entry.currentValue
+          targets.set(id, smooth ? previous + (parameter.value - previous) * expression.strength : parameter.value)
+        }
       }
     }
     // Explicit component targets override a group affecting the same parameter.
-    for (const [axis, value] of Object.entries(components))
+    for (const [axis, value] of Object.entries(this.store.llmMode === 'all' ? components : {}))
       this.targetComponent(targets, axis as keyof Components, value)
-    for (const [id, write] of this.writes) {
-      const entry = this.store.expressions.get(id)
-      if (entry?.currentValue !== write.written) {
+    for (const [id, revision] of this.revisions) {
+      const write = this.writes.get(id)
+      if (this.store.getEditRevision(id) !== revision || (write && this.store.expressions.get(id)?.currentValue !== write.written))
         this.blocked.add(id)
-        this.writes.delete(id)
-      }
-      else if (!targets.has(id)) {
-        this.store.set(id, write.previous)
-        this.writes.delete(id)
+    }
+    // Families can overlap, so close the whole connected group before restoring any sibling.
+    let size = -1
+    while (size !== this.blocked.size) {
+      size = this.blocked.size
+      for (const family of this.groups) {
+        if ([...family].some(id => this.blocked.has(id))) {
+          for (const id of family)
+            this.blocked.add(id)
+        }
       }
     }
-    for (const [id, written] of targets) {
+    for (const [id, write] of this.writes) {
+      const entry = this.store.expressions.get(id)
+      if (entry?.currentValue !== write.written || this.store.getEditRevision(id) !== write.revision) {
+        this.blocked.add(id)
+        this.writes.delete(id)
+        this.store.clearTransient(id)
+      }
+      else if (!targets.has(id) || this.blocked.has(id)) {
+        this.store.setTransientValue(id, write.previous, write.previous)
+        this.writes.delete(id)
+        this.store.clearTransient(id)
+      }
+    }
+    for (const [id, target] of targets) {
       const entry = this.store.expressions.get(id)
       if (!entry || this.blocked.has(id))
         continue
-      this.writes.set(id, { previous: this.writes.get(id)?.previous ?? entry.currentValue, written })
-      this.store.set(id, written)
+      const previous = this.writes.get(id)?.previous ?? entry.currentValue
+      const continuous = /^(?:ParamBrow|ParamMouthForm)/.test(id) || Object.values(componentBindings).some(binding => binding.id === id && !binding.switch)
+      const written = continuous ? previous + (target - previous) * weight : target
+      this.writes.set(id, { previous, written, revision: this.store.getEditRevision(id) })
+      this.store.setTransientValue(id, previous, written)
     }
-    return group && expression && expression.strength > 0 ? group.name : ''
+    return activeGroups.filter(group => group.parameters.some(parameter => this.writes.has(parameter.parameterId))).map(group => group.name).join('、')
   }
 
   private targetComponent(targets: Map<string, number>, axis: keyof Components, amount: number) {

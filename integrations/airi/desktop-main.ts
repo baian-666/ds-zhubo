@@ -38,7 +38,7 @@ export function connectCohostDesktop(stage: Window) {
       const headers: Record<string, string> = {}
       if (env.COHOST_ACCESS_TOKEN)
         headers.Authorization = `Bearer ${env.COHOST_ACCESS_TOKEN}`
-      const response = await fetch(`${origin}/api/status`, { headers, signal: request.signal })
+      const response = await fetch(`${origin}/api/stage-performance`, { headers, signal: request.signal })
       if (!response.ok)
         return
       const data: unknown = await response.json()

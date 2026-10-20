@@ -1,4 +1,5 @@
-import {parseMotionSequence,sequenceDuration} from '../../integrations/airi/motion-sequence.ts'
+import {parseMotionSequence,sequenceDuration} from '../../packages/cohost-contracts/motion.ts'
+import {sameTarget} from '../../packages/cohost-contracts/performance.ts'
 export const performances = ['idle', 'listen', 'think', 'nod', 'smile', 'surprise', 'pout']
 
 // Text is emitted immediately except a possible control prefix. Controls can follow a spoken sentence.
@@ -38,29 +39,46 @@ export async function* performedText(chunks, onPerformance) {
 
 /** One transient performance, owned by its reply turn. Pending speech waits at most 30 seconds. */
 export class Performance {
-  constructor({ now = Date.now } = {}) { this.now = now; this.sequence = 0; this.current = null }
-  play(name, { motion, turn = null, source = 'model', durationMs = 2600, defer = false } = {}) {
+  constructor({ now = Date.now } = {}) { this.now = now; this.sequence = 0; this.current = null; this.recent = [] }
+  play(name, { motion, target, issues = [], turn = null, audioId, scope = '', source = 'model', durationMs = 2600, defer = false } = {}) {
     const parsed=motion===undefined ? null : parseMotionSequence(motion)
     if(motion!==undefined && !parsed)return false
     if(!parsed && !performances.includes(name))return false
     const duration=parsed ? sequenceDuration(parsed)+250 : durationMs
-    this.current = { id: ++this.sequence, name:parsed ? 'sequence' : name, turn, source,
+    this.current = { id: ++this.sequence, name:parsed ? 'sequence' : name, turn, audioId, source, target, issues,
       ...(parsed ? {motion:parsed} : {}), startedAt:defer ? null : this.now(),
-      durationMs:duration, expiresAt:this.now()+(defer ? 30000 : duration) }
+      durationMs:duration, expiresAt:this.now()+(defer ? 30000 : audioId ? 120000 : duration) }
+    // Accepted intent is context, not proof of visible rendering. A late plan
+    // replaces this turn's initial posture instead of counting as another turn.
+    if(turn !== null)this.recent=this.recent.filter(item=>item.turn!==turn || item.scope!==scope)
+    this.recent.push({at:this.now(),turn,scope,target,name:this.current.name,label:parsed?.label??'',source,
+      poses:[...new Set(parsed?.frames.flatMap(frame=>Object.keys(frame.pose))??[])],
+      expressions:[...new Set(parsed?.frames.flatMap(frame=>frame.expression?[frame.expression.name]:[])??[])],
+      components:[...new Set(parsed?.frames.flatMap(frame=>Object.keys(frame.components??{}))??[])]})
+    this.recent=this.recent.slice(-6)
     return true
+  }
+  recentPlans(scope, target) {
+    return this.recent.filter(item=>item.scope===scope && sameTarget(item.target,target) && this.now()-item.at<=90000)
+      .map(({at,name,label,source,poses,expressions,components})=>({ageMs:Math.max(0,this.now()-at),name,label,source,poses:[...poses],expressions:[...expressions],components:[...components]}))
   }
   start(turn) {
     const current=this.current
     if(current?.turn!==turn || current.startedAt!==null || current.expiresAt<=this.now())return false
-    current.startedAt=this.now();current.expiresAt=this.now()+current.durationMs
+    current.startedAt=this.now();current.expiresAt=this.now()+(current.audioId ? 120000 : current.durationMs)
     return true
+  }
+  finish(turn) {
+    if(this.current?.turn!==turn || !this.current.audioId)return
+    this.current.expiresAt=Math.min(this.current.expiresAt,this.now()+700)
   }
   clear() { this.current = null; this.sequence++ }
   cancel(turn) { if(this.current?.turn===turn)this.clear() }
-  snapshot({muted,hostSpeaking,thinking=false}={}) {
+  snapshot({muted,hostSpeaking,thinking=false,target}={}) {
     if(this.current?.expiresAt<=this.now())this.clear()
     const current=muted ? null : this.current
+    if(current?.target && target && !sameTarget(current.target,target))return {id:current.id,name:'idle',target,issues:['stale-capabilities'],turn:current.turn,source:current.source,expiresAt:this.now()+1200}
     if(current)return {...current,expiresAt:Math.min(current.expiresAt,this.now()+1200)}
-    return {id:this.sequence,name:muted?'idle':hostSpeaking||thinking?'listen':'idle',turn:null,source:'state',expiresAt:this.now()+1200}
+    return {id:this.sequence,name:muted?'idle':hostSpeaking||thinking?'listen':'idle',target,turn:null,source:'state',expiresAt:this.now()+1200}
   }
 }

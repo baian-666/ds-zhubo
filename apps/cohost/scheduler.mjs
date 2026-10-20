@@ -1,10 +1,15 @@
+import { randomUUID } from 'node:crypto'
+
 // One instance owns one live session. Platform adapters must assign stable IDs.
 export class Scheduler {
-  constructor({ now = Date.now, cooldownMs = 20_000, userCooldownMs = 60_000, ttlMs = 20_000, playbackTimeoutMs = 15_000 } = {}) {
+  constructor({ now = Date.now, cooldownMs = 20_000, userCooldownMs = 60_000, ttlMs = 20_000, playbackTimeoutMs = 15_000, synthesisTimeoutMs = 60_000 } = {}) {
     this.now = now
     this.cooldownMs = cooldownMs
     this.userCooldownMs = userCooldownMs
     this.ttlMs = ttlMs
+    this.hostingViewers = () => false
+    this.hostingTtlMs = 90_000
+    this.viewerDuplicates = new Map()
     this.queue = []
     this.seen = new Map()
     this.users = new Map()
@@ -13,35 +18,53 @@ export class Scheduler {
     this.hostSpeaking = false
     this.muted = false
     this.version = 0
+    this.epoch = randomUUID()
     this.lastCompletedTurn = null
     this.lastCompletedAt = -Infinity
     this.playbackTimeoutMs = playbackTimeoutMs
+    this.synthesisTimeoutMs = synthesisTimeoutMs
     this.onDelivered = () => {}
   }
 
   prune() {
     const now = this.now()
-    this.queue = this.queue.filter(item => now - item.receivedAt < this.ttlMs)
+    this.queue = this.queue.filter(item => now < this.viewerExpiresAt(item))
     for (const [key, until] of this.seen) if (now >= until) this.seen.delete(key)
     for (const [key, until] of this.users) if (now >= until) this.users.delete(key)
+    for (const [key, until] of this.viewerDuplicates) if (now >= until) this.viewerDuplicates.delete(key)
+  }
+
+  viewerExpiresAt(item) {
+    return item.receivedAt + (this.hostingViewers() && item.hosting ? this.hostingTtlMs : this.ttlMs)
   }
 
   enqueue(message) {
     this.prune()
     const key = `${message.platform}:${message.id}`
     if (this.seen.has(key)) return false
+    const hosting = this.hostingViewers()
+    const duplicate = JSON.stringify([message.platform,message.userId,message.text.trim().replace(/\s+/gu,' ')])
+    if (hosting && this.viewerDuplicates.has(duplicate)) return false
     this.seen.set(key, this.now() + 120_000)
     if (this.seen.size > 4096) this.seen.delete(this.seen.keys().next().value)
     const receivedAt=message.real && Number.isFinite(message.sourceAt) ? Math.min(this.now(),message.sourceAt) : this.now()
-    this.queue.push({ ...message, receivedAt })
+    if (hosting) {
+      this.viewerDuplicates.set(duplicate,this.now()+10_000)
+      if(this.viewerDuplicates.size>4096)this.viewerDuplicates.delete(this.viewerDuplicates.keys().next().value)
+      // A prolific viewer cannot displace everyone else's pending messages.
+      const previous=this.queue.filter(item=>item.platform===message.platform && item.userId===message.userId)
+      const removed=new Set(previous.slice(0,Math.max(0,previous.length-2)))
+      this.queue=this.queue.filter(item=>!removed.has(item))
+    }
+    this.queue.push({ ...message, receivedAt, hosting })
     if (this.queue.length > 128) this.queue.shift()
     return true
   }
 
-  interrupt() {
+  interrupt(reason) {
     this.version += 1
     this.commitPlayed(this.active)
-    this.active?.controller.abort()
+    this.active?.controller.abort(reason)
     this.active = null
   }
 
@@ -70,7 +93,16 @@ export class Scheduler {
   eligibleViewers() {
     this.expirePlayback()
     this.prune()
-    if (this.muted || this.hostSpeaking || this.active || this.now() - this.lastViewerReply < this.cooldownMs) return []
+    if (this.muted || this.hostSpeaking || this.active) return []
+    if(this.hostingViewers()) {
+      // Round-robin by viewer before the planner's bounded snapshot is sliced.
+      const counts=new Map()
+      return this.queue.map(item=>{
+        const key=JSON.stringify([item.platform,item.userId]),rank=counts.get(key)??0
+        counts.set(key,rank+1);return {item,rank}
+      }).sort((a,b)=>a.rank-b.rank || Number(Boolean(b.item.selected))-Number(Boolean(a.item.selected)) || a.item.receivedAt-b.item.receivedAt).map(x=>x.item)
+    }
+    if(this.now() - this.lastViewerReply < this.cooldownMs)return []
     return this.queue.filter(item => (item.mentioned || item.selected || item.real) && !this.users.has(`${item.platform}:${item.userId}`))
       .sort((a, b) => Number(Boolean(b.selected)) - Number(Boolean(a.selected)) || a.receivedAt - b.receivedAt)
   }
@@ -95,8 +127,8 @@ export class Scheduler {
   begin(input) {
     const turn = { id: ++this.version, controller: new AbortController(), input,
       delivery: 'text', answer: '', playedChars: 0, committed: false,
-      generationDone: false, playback: 'waiting', playbackDeadline: Infinity }
-    turn.audioId = `${turn.id}:0`
+      generationDone: false, playback: 'waiting', playbackDeadline: Infinity, synthesis: new Map() }
+    turn.audioId = `${this.epoch}:${turn.id}:0`
     this.active = turn
     return turn
   }
@@ -121,11 +153,30 @@ export class Scheduler {
   commitPlayed(turn) {
     if (!turn || turn.committed || !turn.playedChars) return
     turn.committed = true
-    this.onDelivered(turn.input, turn.answer.slice(0, turn.playedChars))
+    this.onDelivered(turn.input, turn.answer.slice(0, turn.playedChars), turn)
   }
 
   expirePlayback() {
-    if (this.active?.delivery === 'audio' && this.now() >= this.active.playbackDeadline) this.interrupt()
+    const turn = this.active
+    if (turn?.delivery !== 'audio') return
+    // A renderer cannot acknowledge audio that the provider has not produced yet.
+    // Bound the oldest pending request so queued work cannot keep a stuck turn alive.
+    const deadline = turn.synthesis.size ? Math.min(...turn.synthesis.values()) : turn.playbackDeadline
+    if (this.now() >= deadline) this.interrupt('speech_timeout')
+  }
+
+  beginSynthesis(turn) {
+    this.expirePlayback()
+    if (!this.isCurrent(turn) || turn.delivery !== 'audio') return null
+    const request = Symbol('synthesis')
+    turn.synthesis.set(request, this.now() + this.synthesisTimeoutMs)
+    return () => {
+      this.expirePlayback()
+      if (!turn.synthesis.delete(request) || !this.isCurrent(turn)) return
+      // Give the renderer a full receipt window after synthesis, including gaps
+      // between sentences. This never counts unplayed text as delivered.
+      turn.playbackDeadline = this.now() + this.playbackTimeoutMs
+    }
   }
 
   // One logical audio stream per turn; offsets are acknowledged UTF-16 text prefixes.
@@ -135,7 +186,7 @@ export class Scheduler {
     const turn = this.active
     if (!turn || turn.id !== id || turn.audioId !== audioId || turn.delivery !== 'audio') return false
     if (event === 'started') {
-      if (this.hostSpeaking || this.muted || turn.playback !== 'waiting' || !turn.answer) return false
+      if ((this.hostSpeaking && !turn.canStart?.()) || this.muted || turn.playback !== 'waiting' || !turn.answer) return false
       turn.playback = 'playing'
     } else {
       if (turn.playback !== 'playing' && !['stopped', 'error'].includes(event)) return false

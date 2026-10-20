@@ -14,11 +14,20 @@
     "setup:airi": "node scripts/airi.mjs setup",
     "dev:airi": "node scripts/airi.mjs dev",
     "setup:airi:web": "node scripts/airi.mjs setup-web",
+    "setup:airi:checks": "node scripts/airi.mjs setup-checks",
+    "check:airi": "node scripts/check-airi.mjs",
     "setup:desktop": "node scripts/desktop.mjs setup",
     "dev:desktop": "node scripts/desktop.mjs dev",
     "check:desktop": "node scripts/desktop.mjs check",
     "build:desktop": "node scripts/desktop.mjs build",
+    "start:desktop": "node scripts/desktop.mjs start",
+    "rollback:desktop": "node scripts/desktop.mjs rollback",
     "test:voice:native": "node scripts/voice-native-smoke.mjs",
     "configure:voice": "node scripts/configure-voice.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@moeru/eventa": "1.0.2",
+    "valibot": "1.4.2"
   }
 }

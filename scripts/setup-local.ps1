@@ -28,5 +28,10 @@ foreach ($taskPackage in @(@{Name='npm';Version='11.19.0'},@{Name='pnpm';Version
   if ($LASTEXITCODE -ne 0) { throw 'Toolchain package installation failed.' }
 }
 $taskEnv = Join-Path $taskRoot '.env'
+Push-Location $taskRoot
+try {
+  & $taskNode (Join-Path $taskTools 'npm-11.19.0/node_modules/npm/bin/npm-cli.js') ci --ignore-scripts --no-audit --no-fund
+  if ($LASTEXITCODE -ne 0) { throw 'Cohost dependencies could not be installed.' }
+} finally { Pop-Location }
 if (!(Test-Path -LiteralPath $taskEnv)) { Copy-Item -LiteralPath (Join-Path $taskRoot '.env.example') -Destination $taskEnv }
 Write-Output 'Local Node 26.7.0, npm 11.19.0 and pnpm 11.24.0 ready. Existing .env preserved.'

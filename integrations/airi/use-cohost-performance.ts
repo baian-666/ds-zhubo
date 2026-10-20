@@ -1,20 +1,24 @@
 import type { Command, Receipt } from './cohost-contract'
+import type { poseParameters } from './pose-control.ts'
 
 import { createContext } from '@moeru/eventa/adapters/window-message'
 import { useSettingsLive2d } from '@proj-airi/stage-ui-live2d/composables/live2d'
 import { neutralLive2DMotionControlPose, useExpressionStore, useL2dViewControl, useLive2DMotionControl } from '@proj-airi/stage-ui-live2d/stores'
+import { cohostPerformanceClock, cohostPerformanceRhythm } from '@proj-airi/stage-ui/composables/cohost-media-state'
 import { DisplayModelFormat, useDisplayModelsStore } from '@proj-airi/stage-ui/stores/display-models'
-import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
 import { useSettingsStageModel } from '@proj-airi/stage-ui/stores/settings/stage-model'
 import { useStartupResourcesStore } from '@proj-airi/stage-ui/stores/startup-resources'
 import { until } from '@vueuse/core'
-import { onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 
 import * as v from 'valibot'
 
 import { channel, commandEvent, commandSchema, receiptEvent } from './cohost-contract'
-import { sampleMotionSequence } from './motion-sequence'
+import { evaluatePerformance, performanceTarget } from '../../packages/cohost-contracts/performance.ts'
+import { parseMotionSequence, sampleMotionSequence, sequenceDuration } from './motion-sequence'
+import { sampleNod } from './pose-control'
 import { RigController } from './rig-controller'
+import { whaleCapabilities } from './whale-capabilities'
 
 /**
  * Runs transient poses for the local rehearsal iframe. No model credentials cross this boundary.
@@ -26,7 +30,6 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
   const expressions = useExpressionStore()
   const settings = useSettingsStageModel()
   const models = useDisplayModelsStore()
-  const cards = useAiriCardStore()
   const live2d = useSettingsLive2d()
   const view = useL2dViewControl()
   const modelImport = new AbortController()
@@ -39,45 +42,89 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
   let receivedAt = 0
   let owned = false
   let modelImporting = false
+  let poseTakenOver = false
 
+  const capabilities = computed(() => whaleCapabilities(expressions, live2d.live2dExpressionEnabled, settings.stageModelRenderer))
   const rig = new RigController(expressions)
   let nativeExpression = ''
+  let policySignature = ''
+  let blockedCommand: { session: string, id: number } | undefined
 
   function release() {
-    rig.restore()
-    nativeExpression = ''
-    if (!owned)
-      return
-    motion.release(owner)
-    motion.releaseExclusiveControl(owner)
-    owned = false
+    try {
+      rig.restore()
+    }
+    finally {
+      nativeExpression = ''
+      if (owned) {
+        motion.release(owner)
+        motion.releaseExclusiveControl(owner)
+        owned = false
+      }
+    }
+  }
+
+  function emit(receipt: Receipt) {
+    void runtime?.context.emit(receiptEvent, receipt)
+    external?.emit(receipt)
   }
 
   function tick() {
+    try {
+      tickPerformance()
+    }
+    catch {
+      // Animation errors cannot escape into the media controller or the text stream.
+      if (command) {
+        blockedCommand = { session: command.session, id: command.id }
+        emit({ ready: false, name: 'idle', session: command.session, id: command.id, outcome: 'failed', issues: ['adapter-failed'] })
+      }
+      command = undefined
+      try {
+        release()
+      }
+      catch {
+        // The model can disappear during teardown.
+      }
+    }
+  }
+
+  function tickPerformance() {
     const now = Date.now()
+    const policy = performanceTarget(capabilities.value).revision
+    if (policySignature && policySignature !== policy) {
+      if (command) {
+        blockedCommand = { session: command.session, id: command.id }
+        emit({ ready: false, name: 'idle', session: command.session, id: command.id, outcome: 'stale', issues: ['stale-capabilities'] })
+      }
+      command = undefined
+      release()
+    }
+    policySignature = policy
     if (!command || now - receivedAt > 1500) {
       release()
       return
     }
     const ready = !modelImporting && settings.stageModelRenderer === 'live2d'
       && (modelReady ? modelReady() : startup.resources.some(resource => resource.id === 'model' && resource.status === 'ready'))
-    const name = command.expiresAt > now ? command.name : 'idle'
-    const sample = name === 'sequence' && command.motion && command.startedAt !== null && command.startedAt !== undefined
-      ? sampleMotionSequence(command.motion, now - command.startedAt)
+    const decision = evaluatePerformance(command, capabilities.value, now)
+    let name = decision.performance as Command['name']
+    const plan = decision.motion && parseMotionSequence(decision.motion)
+    if (decision.motion && !plan)
+      name = 'idle'
+    const beat = cohostPerformanceRhythm.sample(command, cohostPerformanceClock.sample(), now)
+    const elapsed = beat.speech && plan ? Math.min(beat.elapsedMs, sequenceDuration(plan) - 1) : beat.elapsedMs
+    const sample = name === 'sequence' && plan && !beat.waiting
+      ? sampleMotionSequence(plan, elapsed)
       : undefined
-    const waiting = command.startedAt === null
-    if (!ready || name === 'idle' || waiting || sample?.finished) {
+    const waiting = decision.outcome === 'waiting' || beat.waiting
+    if (!ready || name === 'idle' || waiting || sample?.finished || beat.finished) {
       release()
     }
     else {
-      if (!owned) {
-        motion.claimExclusiveControl(owner)
-        owned = true
-      }
       const basicExpression = ['smile', 'think', 'surprise', 'pout'].includes(name) ? { name: name as 'smile' | 'think' | 'surprise' | 'pout', strength: 1 } : undefined
-      nativeExpression = rig.apply(sample ? sample.expression : basicExpression, sample ? sample.components : {})
-      const pose = { ...neutralLive2DMotionControlPose }
-      const wave = Math.sin(now / 230)
+      nativeExpression = rig.apply(sample ? sample.expressions : basicExpression, sample ? sample.components : {}, beat.weight)
+      const pose: Partial<typeof neutralLive2DMotionControlPose> = {}
       if (name === 'listen') {
         pose.headZ = 0.09
         pose.eyeX = -0.1
@@ -88,9 +135,7 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
         pose.eyeX = 0.25
       }
       if (name === 'nod') {
-        pose.headY = wave * 0.6
-        pose.headZ = 0.08
-        pose.eyeSquint = 0.12
+        pose.headY = sampleNod(beat.elapsedMs)
       }
       if (name === 'smile') {
         pose.eyeSquint = 0.55
@@ -110,11 +155,33 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
       }
       if (sample)
         Object.assign(pose, sample.pose)
-      motion.setPose(owner, pose, { follow: 0.85, inertia: 0.25 })
+      if (motion.exclusiveOwnerId && motion.exclusiveOwnerId !== owner)
+        poseTakenOver = true
+      const axes = (Object.keys(pose) as (keyof typeof poseParameters)[]).filter(axis => rig.permitsPose(axis))
+      if (poseTakenOver || axes.length === 0) {
+        motion.release(owner)
+        motion.releaseExclusiveControl(owner)
+        owned = false
+      }
+      else {
+        if (!owned) {
+          motion.claimExclusiveControl(owner)
+          owned = true
+        }
+        const target = { ...neutralLive2DMotionControlPose }
+        for (const axis of axes)
+          target[axis] = (pose[axis] ?? 0) * beat.poseWeight
+        motion.setPose(owner, target, { follow: 0.85, inertia: 0.25 }, axes)
+      }
     }
-    const receipt = { ready, name, expression: nativeExpression, session: command.session, id: command.id, label: command.motion?.label, step: sample?.step, waiting }
-    void runtime?.context.emit(receiptEvent, receipt)
-    external?.emit(receipt)
+    const manual = poseTakenOver || rig.manuallyControlled
+    const outcome = !ready ? 'unavailable' : decision.motion && !plan ? 'unsupported' : sample?.finished || beat.finished ? 'idle' : waiting ? 'waiting' : manual && name !== 'idle' ? 'partial' : decision.outcome
+    const issues = [...decision.issues]
+    if (decision.motion && !plan)
+      issues.push('adapter-unsupported')
+    if (manual)
+      issues.push('manual-control')
+    emit({ ready, name, expression: nativeExpression, session: command.session, id: command.id, label: command.motion?.label, step: sample?.step, waiting, outcome, issues: issues.slice(0, 32) })
   }
 
   function receive(body: unknown) {
@@ -122,10 +189,16 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
     if (!parsed.success)
       return
     const incoming = parsed.output
+    if (blockedCommand?.session === incoming.session && incoming.id <= blockedCommand.id)
+      return
     if (incoming.session === command?.session && incoming.id < command.id)
       return
     if (incoming.expiresAt > Date.now() + 5000 || (incoming.startedAt !== undefined && incoming.startedAt !== null && incoming.startedAt > Date.now() + 500))
       return
+    if (incoming.session !== command?.session || incoming.id !== command.id) {
+      release()
+      poseTakenOver = false
+    }
     command = incoming
     receivedAt = Date.now()
     tick()
@@ -166,7 +239,8 @@ export function useCohostPerformance(connect?: (receive: (body: unknown) => void
       view.set('scale', 0.45)
       view.set('y', 20)
       settings.stageModelSelected = imported.id
-      await cards.updateActiveCardDisplayModel(imported.id)
+      // Automatic installation is local to this browser profile. Do not publish
+      // its generated resource ID as a user edit to the shared character card.
       await settings.updateStageModel()
       localStorage.setItem('cohost/whale-installed-v2', imported.id)
     }
